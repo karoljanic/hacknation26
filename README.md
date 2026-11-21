@@ -238,6 +238,165 @@ całą treść fragmentów do Google i może być płatne. W przypadku obrazu, a
 lub wideo cały plik jest wcześniej wysyłany do Google do odczytu. Nie wysyłaj
 danych wrażliwych bez odpowiednich zgód.
 
+## Źródło Google Fact Check
+
+`GoogleFactCheckAdapter` w `prawdowid/adapters/sources/google_fact_check.py`
+implementuje niezależny kontrakt `FactCheckSource`. Wyszukuje istniejące
+fact-checki; nie tworzy recenzji i nie wydaje własnego werdyktu.
+
+Włącz **Fact Check Tools API** w projekcie Google Cloud i ustaw
+`FACTCHECK_API_KEY` w środowisku. W `.env.example` jest tylko puste pole;
+rzeczywisty klucz zapisuj wyłącznie lokalnie, nigdy w pliku przykładowym.
+Compose przekazuje zmienną workerom, ale nie frontendowi. Przykłady Python
+nie wczytują `.env` automatycznie: poza Compose trzeba przekazać zmienne
+środowiskowe samodzielnie.
+
+```bash
+cd apps/backend
+pip install -e '.[test]'
+
+python examples/fact_check_demo.py --query "Ziemia jest płaska" --language pl
+python examples/fact_check_demo.py --publisher demagog.org.pl --page-size 5
+python examples/fact_check_demo.py --image-url "https://example.org/obraz.jpg"
+python examples/fact_check_demo.py --query "szczepionki" --language pl --max-age-days 30
+```
+
+Wyszukiwanie tekstowe obsługuje zapytanie, język, domenę wydawcy, wiek
+wyników i paginację. Wyszukiwanie obrazowe obsługuje **publiczny URL obrazu**,
+język i paginację. Google nie przyjmuje tutaj lokalnego pliku ani bajtów obrazu;
+adapter nie publikuje prywatnych plików automatycznie. Dostępność obrazu dla
+serwerów Google nie jest gwarantowana.
+
+`--page-token TOKEN` pobiera następną stronę; pozostałe parametry muszą
+pozostać takie same. Alternatywą jest `--offset N`, bez tokenu. Lokalny limit
+strony to 1–100 wyników. Brak filtra języka oznacza wyszukiwanie bez tego
+ograniczenia.
+
+Połączenie z istniejącym przygotowaniem wejścia i ekstrakcją claims:
+
+```bash
+python examples/extract_claims.py --text "Przykładowa teza do sprawdzenia." --fact-check
+python examples/extract_claims.py --url "https://example.org/artykul" --fact-check
+python examples/extract_claims.py --image /sciezka/obraz.png --fact-check
+python examples/extract_claims.py --audio /sciezka/nagranie.wav --fact-check
+python examples/extract_claims.py --video /sciezka/film.mp4 --fact-check
+```
+
+Te warianty wymagają również `GEMINI_API_KEY`: obraz przechodzi OCR, a audio
+i wideo odczyt/transkrypcję, następnie wyodrębnione tezy są wyszukiwane
+**tekstowo** w Fact Check. Nie jest to natywne wyszukiwanie audio/wideo ani
+porównywanie lokalnego obrazu z bazą obrazów.
+
+`FactCheckTool.search_claims` wiąże wyniki z identyfikatorami tez, pomija
+opinie (zwraca ich identyfikatory) i współdzieli jedno żądanie dla identycznych
+zapytań w danej paczce. Domyślnie wyszukuje pierwszą stronę po 5 wyników
+w języku polskim, maksymalnie 10 różnych zapytań. Przekroczenie limitu
+powoduje błąd przed wysłaniem żądań, nie ciche pominięcie tez.
+
+Wyniki zachowują autora tezy, daty, wydawcę, URL, tytuł i oryginalną ocenę
+`textual_rating`, a także czas pobrania i token kolejnej strony. To kandydaci
+do dalszej analizy: podobna teza może mieć inną datę lub kontekst. Pusta lista
+oznacza brak trafień, **nie fałsz**. API zwraca metadane recenzji, nie pełny
+tekst artykułu ani zweryfikowane fragmenty dowodowe.
+
+Klucz trafia do nagłówka, nie URL. Adapter nie podąża za przekierowaniami
+i nie ponawia automatycznie żądań; błędy HTTP (w tym limity 429), sieciowe
+i błędne odpowiedzi są jawne. Limit odpowiedzi wynosi 2 MB, timeout operacji
+HTTP 10 s. Każde żądanie zużywa limit Google, a przygotowanie mediów/claims
+może naliczać koszt LLM. Ta integracja jest dostępna przez serwis i CLI;
+nie dodaje jeszcze zadań Celery ani endpointu API.
+
+Dokumentacja: [claims.search](https://developers.google.com/fact-check/tools/api/reference/rest/v1alpha1/claims/search),
+[claims.imageSearch](https://developers.google.com/fact-check/tools/api/reference/rest/v1alpha1/claims/imageSearch).
+
+## Źródło EUvsDisinfo MCP
+
+`EUvsDisinfoAdapter` w `prawdowid/adapters/sources/euvsdisinfo.py` korzysta
+z oficjalnego Python MCP SDK i endpointu `https://mcp.euvsd.info/mcp`.
+Obsługuje wszystkie cztery narzędzia udokumentowane przez dostawcę:
+
+- `cases`: przypadki dezinformacji, `offset >= 0`, `limit` od 1 do 100;
+- `articles`: artykuły analityczne, takie same parametry paginacji;
+- `search`: wyszukiwanie pełnotekstowe artykułów i przypadków, zapytanie
+  z co najmniej 3 znakami, opcjonalne `date_from` i `date_to`;
+- `narratives`: narracje, opcjonalnie z zakresem dat.
+
+Zakresy dat są walidowane lokalnie i wysyłane jako `YYYY-MM-DD`.
+`date_from > date_to` jest błędem. Paginacja pobiera jedną wskazaną stronę,
+nie cały katalog automatycznie. Do następnej strony dodaj `limit` do `offset`.
+
+Ustaw osobny `EUVSDISINFO_API_KEY` w środowisku lub lokalnym `.env` dla Compose.
+Klucz Google/TypeSafe nie zastępuje klucza EUvsDisinfo. Domyślnie klucz trafia
+do `Authorization: Bearer`, nie URL. Przykłady:
+
+```bash
+cd apps/backend
+pip install -e '.[test]'
+
+python examples/euvsdisinfo_demo.py health
+python examples/euvsdisinfo_demo.py tools
+python examples/euvsdisinfo_demo.py cases --limit 10 --offset 0
+python examples/euvsdisinfo_demo.py articles --limit 5 --offset 5
+python examples/euvsdisinfo_demo.py search --query "Mariupol"
+python examples/euvsdisinfo_demo.py search --query "biolab" --date-from 2024-01-01 --date-to 2024-12-31
+python examples/euvsdisinfo_demo.py narratives --date-from 2025-01-01 --date-to 2025-03-31
+```
+
+`health` wywołuje publiczny endpoint `/health` i nie wymaga klucza.
+`tools` zwraca opisy i schematy oraz ewentualny `next_cursor`; kolejną stronę
+katalogu pobierzesz przez `tools --cursor TOKEN`. Zwrócone nazwy i opisy nie
+są automatycznie wykonywane: adapter udostępnia tylko cztery powyższe operacje.
+
+Domyślny tryb `stateful` wykonuje handshake `initialize`, SDK wysyła
+powiadomienie initialized, obsługuje identyfikator sesji oraz JSON/SSE
+w Streamable HTTP, a przy zamknięciu próbuje zakończyć sesję przez DELETE.
+Tryb `stateless` nie wykonuje handshake: przekazuje wygenerowany po stronie
+klienta identyfikator sesji, a serwer obsługuje żądania jako efemeryczne.
+Nie należy polegać w nim na korelacji ani wznawianiu zdarzeń pomiędzy żądaniami.
+
+```bash
+python examples/euvsdisinfo_demo.py --mode stateless cases --limit 10
+python examples/euvsdisinfo_demo.py --auth x-api-key search --query "biolab"
+python examples/euvsdisinfo_demo.py --auth query articles --limit 5
+```
+
+Obsługiwane są trzy sposoby autoryzacji: `bearer`, `x-api-key` i `query`.
+Ostatni jest dostępny wyłącznie jako jawna opcja kompatybilności: klucz w URL
+może znaleźć się w logach HTTP/proxy. Preferuj nagłówki i nie publikuj logów
+z kluczami. W sieci z dodatkowym CA obowiązuje opisane wyżej `SSL_CERT_FILE`;
+weryfikacja TLS nie jest wyłączana.
+
+Użycie z kodu aplikacji:
+
+```python
+import os
+
+from prawdowid.adapters.sources.euvsdisinfo import EUvsDisinfoAdapter
+from prawdowid.domain.euvsdisinfo import EUvsDisinfoConnection, EUvsDisinfoSearchRequest
+
+async def search_euvsdisinfo():
+    connection = EUvsDisinfoConnection(api_key=os.environ["EUVSDISINFO_API_KEY"])
+    async with EUvsDisinfoAdapter.connect(connection) as source:
+        return await source.search(EUvsDisinfoSearchRequest(query="Mariupol"))
+```
+
+Wynik zachowuje bloki MCP `content`, opcjonalne `structured_content` oraz
+czas pobrania. Nie zakładamy nieudokumentowanego opakowania tablic wyników:
+jeśli serwer zwraca JSON wewnątrz tekstowego bloku MCP, tekst jest zachowany
+bez zmian. Dotyczy to też oryginalnych pól rekordów (`claim`, `fact`, daty,
+odnośniki, kraje, słowa kluczowe, języki i miniatury).
+
+Błędy JSON-RPC zachowują kod, `isError` z narzędzia powoduje wyjątek, a błędy
+transportu nie są zamieniane na puste wyniki. Timeout HTTP wynosi 10 s
+(odczyt 30 s), oczekiwanie na odpowiedź MCP 30 s. Zserializowany wynik narzędzia
+jest ograniczony do 2 MB po odebraniu/dekodowaniu przez SDK; nie jest to
+limit bajtów pobieranych przez transport.
+
+Dane EUvsDisinfo są materiałem źródłowym, nie automatycznym werdyktem.
+Adapter nie interpretuje zdalnych opisów jako instrukcji i nie wywołuje LLM
+ani innych narzędzi. Jest dostępny z kodu i CLI; nie dodaje jeszcze indeksu,
+autonomicznego routingu LLM ani zadań Celery.
+
 ## Dalsze kroki
 
 Najpierw należy zaimplementować zapis zgłoszeń, bezpieczne przekazywanie zadań
