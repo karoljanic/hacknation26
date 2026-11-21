@@ -32,6 +32,21 @@ konfigurację.
 Zatrzymanie: `docker compose --env-file .env -f deploy/compose.yaml down`.
 Dane PostgreSQL są przechowywane w wolumenie Dockera.
 
+### Szybsze przebudowy
+
+Wszystkie usługi backendu (`migrate`, `api`, workery) korzystają z jednego
+obrazu `prawdowid-backend:dev`, budowanego raz przez usługę `migrate`.
+Zależności Pythona instalują się w osobnej warstwie, więc zmiana samego kodu
+nie pobiera ich ponownie.
+
+```bash
+# pierwsze uruchomienie lub zmiana Dockerfile/pyproject.toml
+docker compose --env-file .env -f deploy/compose.yaml up --build
+# zmiana tylko kodu: przebudowa jest szybka; bez zmian: można pominąć --build
+# na co dzień, bez nieużywanych jeszcze workerów:
+docker compose --env-file .env -f deploy/compose.yaml up --build postgres migrate api web
+```
+
 Jeżeli sieć korzysta z dodatkowego zaufanego certyfikatu CA, można przekazać
 go tylko na czas budowania obrazu frontendu, bez wyłączania weryfikacji TLS:
 

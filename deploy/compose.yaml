@@ -1,8 +1,13 @@
 name: prawdowid
 
+# All backend services run one image, built once by `migrate`. Every backend
+# service depends on `migrate`, so the build is always part of `up`.
+x-backend-image: &backend_image
+  image: prawdowid-backend:dev
+  pull_policy: never
+
 x-worker: &worker
-  build:
-    context: ../apps/backend
+  <<: *backend_image
   environment:
     RABBITMQ_HOST: rabbitmq
     RABBITMQ_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
@@ -31,6 +36,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+      # Poll every second while starting, so dependants start as soon as it is up.
+      start_period: 30s
+      start_interval: 1s
 
   rabbitmq:
     image: rabbitmq:4-alpine
@@ -42,11 +50,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 60s
+      start_interval: 2s
 
   # One-shot: applies Alembic migrations before the API and workers start.
   migrate:
     build:
       context: ../apps/backend
+    image: prawdowid-backend:dev
     command: ["alembic", "upgrade", "head"]
     environment:
       DATABASE_URL: &database_url postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -55,8 +66,7 @@ services:
         condition: service_healthy
 
   api:
-    build:
-      context: ../apps/backend
+    <<: *backend_image
     environment:
       DATABASE_URL: *database_url
     depends_on:
