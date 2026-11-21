@@ -105,6 +105,14 @@ class RunStatus(StrEnum):
     OUT_OF_SCOPE = "out_of_scope"
 
 
+class IngestionStatus(StrEnum):
+    RUNNING = "running"
+    OK = "ok"
+    PARTIAL = "partial"  # some documents failed, the rest were stored
+    FAILED = "failed"  # the collector itself failed (network, API error, ...)
+    SKIPPED = "skipped"  # not attempted, e.g. missing API key
+
+
 class CaseState(StrEnum):
     # The system must distinguish recommending a hand-off from doing it.
     RECOMMENDED = "recommended"

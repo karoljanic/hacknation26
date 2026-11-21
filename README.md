@@ -8,8 +8,9 @@ Celery, RabbitMQ i PostgreSQL.
 To fundament architektury, a nie działający fact-checker. Dostępne są adaptery
 AI, schemat bazy (PostgreSQL + pgvector) i przyjmowanie zgłoszeń z CLI:
 tekst/URL/media → maskowanie danych osobowych → ekstrakcja tez → zapis tez
-z deduplikacją. Nie ma jeszcze API zgłoszeń, korpusu źródeł, wyszukiwania
-dowodów ani werdyktów. Endpoint `/health` potwierdza tylko działanie procesu
+z deduplikacją, oraz zasilanie korpusu źródeł (gov.pl, fact-checki przez
+Google Fact Check, EUvsDisinfo) z podziałem na fragmenty i embeddingami.
+Nie ma jeszcze API zgłoszeń, wyszukiwania dowodów ani werdyktów. Endpoint `/health` potwierdza tylko działanie procesu
 API; `/health/ready` sprawdza połączenie z bazą i migracje.
 
 ## Uruchomienie lokalne
@@ -452,6 +453,82 @@ Dane EUvsDisinfo są materiałem źródłowym, nie automatycznym werdyktem.
 Adapter nie interpretuje zdalnych opisów jako instrukcji i nie wywołuje LLM
 ani innych narzędzi. Jest dostępny z kodu i CLI; nie dodaje jeszcze indeksu,
 autonomicznego routingu LLM ani zadań Celery.
+
+## Korpus źródeł
+
+Katalog źródeł do audytu: [`data/sources/catalog.toml`](data/sources/catalog.toml).
+Każdy wpis podaje rodzaj źródła (`official`, `public_data`, `fact_checker`,
+`media`), domenę, poziom zaufania (`tier`), licencję, **zasadę kwalifikacji**,
+opcjonalne neutralne ostrzeżenie o statusie źródła oraz kolektor z parametrami.
+Fakty oznaczone „do potwierdzenia” (członkostwo IFCN/EFCSN, warunki licencji)
+wymagają sprawdzenia przy przeglądzie katalogu.
+
+Zasady:
+
+- **kwalifikacja** — tylko źródła urzędowe/pierwotne (tier 1) oraz organizacje
+  i bazy weryfikujące informacje (tier 2); uzasadnienie w `inclusion_rule`;
+- **aktualizacja** — każde pobranie zapisuje przebieg w `ingestion_run`
+  (status, liczniki, błędy, parametry). Dokument jest identyfikowany przez
+  (źródło, URL, skrót treści): niezmieniona strona nie jest zapisywana ponownie,
+  zmieniona treść tworzy nową wersję, a stara zostaje do audytu;
+- **wykluczenie** — usunięcie wpisu z katalogu oznacza źródło jako nieaktywne
+  (dokumenty pozostają, nowe nie są pobierane);
+- data publikacji (`published_at`, jeśli źródło ją podaje) i data pobrania
+  (`fetched_at`) są zapisywane osobno; brak daty publikacji jest jawny (NULL);
+- status źródła (np. sankcje UE) nigdy sam nie rozstrzyga o prawdziwości.
+
+Przetwarzanie składa się z niezależnych etapów, które komunikują się wyłącznie
+przez bazę (żaden nie wywołuje kolejnego):
+
+1. `sync-catalog` — katalog → tabela `source`;
+2. `ingest` — kolektor → `document` + `passage` (fragmenty ~1000 znaków według
+   akapitów, z dokładnymi przesunięciami `char_start`/`char_end`);
+3. `embed` — uzupełnia brakujące wektory fragmentów i tez (`embedding IS NULL`),
+   niezależnie od tego, skąd pochodzą. Błąd dostawcy zostawia NULL do kolejnego
+   uruchomienia; równoległe workery nie przetwarzają tych samych wierszy.
+
+| Kolektor | Źródło | Klucz | Co zapisujemy |
+| --- | --- | --- | --- |
+| `gov_pl` | strony i listy aktualności gov.pl (+ PDF-y) | – | oczyszczony tekst strony (bez skryptów, komentarzy i ukrytych elementów) |
+| `google_fact_check` | recenzje ClaimReview wybranego wydawcy | `FACTCHECK_API_KEY` | teza, autor tezy, data, **oryginalna** ocena wydawcy, link — bez treści artykułu |
+| `euvsdisinfo` | przypadki i artykuły EUvsDisinfo (MCP) | `EUVSDISINFO_API_KEY` | streszczenie tezy, analiza, słowa kluczowe, kraje, język artykułu, link |
+
+Ocena fact-checkera jest przechowywana dosłownie w `document.metadata`
+(`textual_rating`) i nie jest tu zamieniana na werdykt. Brak klucza API daje
+przebieg ze statusem `skipped`, awaria źródła — `failed`; żaden z nich nie jest
+traktowany jako „brak dokumentów”.
+
+```bash
+cd apps/backend
+python -m prawdowid.ingestion sync-catalog
+python -m prawdowid.ingestion ingest --source gov-rcb gov-mswia --limit 5
+python -m prawdowid.ingestion ingest --collector google_fact_check
+python -m prawdowid.ingestion ingest --all
+python -m prawdowid.ingestion embed --limit 500          # wymaga GEMINI_API_KEY (koszt)
+python -m prawdowid.ingestion stats                      # stan korpusu wobec wymagań (100 dok., 10 domen, 2 typy)
+```
+
+Te same operacje są dostępne jako zadania Celery: `ingestion.ingest_source`
+i `ingestion.ingest_all` (kolejka `ingestion`, `ingest_all` synchronizuje katalog
+i tworzy osobne zadanie dla każdego źródła) oraz `embedding.embed_pending`
+(kolejka `embedding`, worker `worker-embedding`). Harmonogram (cron/beat) nie
+jest jeszcze skonfigurowany. W Compose katalog jest montowany do workerów
+tylko do odczytu (`PRAWDOWID_CATALOG`).
+
+```bash
+celery -A prawdowid.workers.celery_app call ingestion.ingest_source --args='["gov-rcb"]'
+celery -A prawdowid.workers.celery_app call embedding.embed_pending --args='["passage", 200]'
+```
+
+**Dodanie źródła:** adapter w `adapters/sources` → kolektor w
+`ingestion/collectors/` zwracający `CorpusDocument` (lub `Skipped` dla
+pojedynczego nieużytecznego elementu) → rejestracja w
+`ingestion/collectors/registry.py` → wpis w `catalog.toml`.
+
+Ograniczenia: wszystkie podstrony gov.pl to jedna domena — do wymaganych
+10 domen potrzebne są kolejne źródła (`stats` pokazuje brak). Konkret24 i PAP
+Fakehunter nie zwracają obecnie wyników w Google Fact Check. Embeddingi
+(Gemini, 768 wymiarów) są płatne i wysyłają tekst fragmentów do Google.
 
 ## Dalsze kroki
 

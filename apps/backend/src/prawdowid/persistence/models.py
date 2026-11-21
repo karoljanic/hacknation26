@@ -47,6 +47,7 @@ from prawdowid.domain.enums import (
     ClaimType,
     DocumentRelation,
     EvidenceRelation,
+    IngestionStatus,
     RunStatus,
     SourceKind,
     Strength,
@@ -153,6 +154,11 @@ class Document(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     content_hash: Mapped[str] = mapped_column(String(64))  # sha256 hex of normalised text
     lang: Mapped[str] = mapped_column(String(8))
+    # Source-specific facts kept verbatim (fact-checker rating, claimant,
+    # department, keywords...). `metadata` is reserved by SQLAlchemy, hence `meta`.
+    meta: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
 
     source: Mapped[Source] = relationship(back_populates="documents")
     passages: Mapped[list["Passage"]] = relationship(
@@ -188,8 +194,31 @@ class Passage(Base):
         TSVECTOR, Computed("to_tsvector('simple', text)", persisted=True), deferred=True
     )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), deferred=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(100))
 
     document: Mapped[Document] = relationship(back_populates="passages")
+
+
+class IngestionRun(Base):
+    """One collection pass over a source: the audit trail of corpus updates."""
+
+    __tablename__ = "ingestion_run"
+    __table_args__ = (Index("ix_ingestion_run_source_started", "source_id", text("started_at DESC")),)
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("source.id", ondelete="CASCADE"))
+    status: Mapped[IngestionStatus] = mapped_column(
+        str_enum(IngestionStatus, "ingestion_status"),
+        server_default=IngestionStatus.RUNNING.value,
+    )
+    started_at: Mapped[datetime] = created_at()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # {"seen": 10, "new": 3, "unchanged": 6, "skipped": 1, "failed": 0, "passages": 12}
+    counts: Mapped[dict[str, Any]] = json_object()
+    errors: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    params: Mapped[dict[str, Any]] = json_object()  # collector parameters used
+
+    source: Mapped[Source] = relationship()
 
 
 class DocumentLink(Base):
