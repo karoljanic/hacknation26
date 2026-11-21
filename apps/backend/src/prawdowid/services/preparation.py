@@ -1,4 +1,4 @@
-from bs4 import BeautifulSoup
+from prawdowid.adapters.sources.gov_pl import sanitize_soup
 
 from prawdowid.ai.adapters.llm import LLMAdapter
 from prawdowid.ai.adapters.media import Media
@@ -48,9 +48,13 @@ class InputPreparer:
 
     def prepare_url(self, url: str) -> PreparedInput:
         article = self.fetcher.fetch(url)
-        soup = BeautifulSoup(article.body, "html.parser", from_encoding=article.encoding)
+        # Text a reader cannot see (CSS-hidden, aria-hidden, HTML comments) is
+        # a classic prompt-injection carrier: it is removed before anything
+        # reaches a model. Used both for user-submitted URLs and for evidence
+        # pages fetched in full.
+        soup = sanitize_soup(article.body, encoding=article.encoding)
         title = soup.title.get_text(" ", strip=True) if soup.title else None
-        for node in soup(["script", "style", "nav", "header", "footer", "aside", "noscript", "form"]):
+        for node in soup(["nav", "header", "footer", "aside", "form"]):
             node.decompose()
         root = soup.find("article") or soup.find("main") or soup.body
         if root is None:

@@ -81,6 +81,11 @@ class Claim(BaseModel):
     # A question asking for information ("Kiedy...?", "Ile...?") rather than
     # whether a statement is true: outside a true/false checker's scope.
     open_question: bool = False
+    # Search aid only (EUvsDisinfo and other English-language sources); never
+    # shown to the user or stored as the claim's wording.
+    text_en: str | None = Field(
+        default=None, description="Faithful English translation of text, for searching English sources."
+    )
 
     @field_validator("id", "text")
     @classmethod

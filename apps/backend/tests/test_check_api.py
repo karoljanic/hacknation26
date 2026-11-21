@@ -69,7 +69,14 @@ def stub_pipeline():
     result = PipelineResult(uuid.uuid4(), uuid.uuid4(), RunStatus.OK, claims=[])
     pipeline.run_text = AsyncMock(return_value=result)
     pipeline.run_url = AsyncMock(return_value=result)
-    pipeline.run_prepared = AsyncMock(return_value=result)
+    pipeline.prepared_inputs = []
+
+    async def run_deferred(prepare, **kwargs):
+        # Like the real pipeline: preparation runs inside the run.
+        pipeline.prepared_inputs.append(prepare())
+        return result
+
+    pipeline.run_deferred = AsyncMock(side_effect=run_deferred)
 
     @asynccontextmanager
     async def factory():
@@ -107,7 +114,7 @@ def test_scenario_reaches_the_pipeline(scenario: Scenario, stub_pipeline) -> Non
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert (
-        stub_pipeline.run_text.called or stub_pipeline.run_url.called or stub_pipeline.run_prepared.called
+        stub_pipeline.run_text.called or stub_pipeline.run_url.called or stub_pipeline.run_deferred.called
     )
 
 
@@ -139,6 +146,15 @@ def test_url_without_question_goes_through_run_url(stub_pipeline) -> None:
     stub_pipeline.run_text.assert_not_called()
 
 
+def test_url_with_question_prepends_the_question_inside_the_run(stub_pipeline) -> None:
+    post_check({"type": "url", "url": "https://example.org/a", "text": "Czy to prawda?"})
+
+    stub_pipeline.run_deferred.assert_called_once()
+    assert stub_pipeline.run_deferred.call_args.kwargs["url"] == "https://example.org/a"
+    segments = stub_pipeline.prepared_inputs[0].segments
+    assert [segment.text for segment in segments] == ["Czy to prawda?", "Treść przykładowego artykułu."]
+
+
 def test_missing_api_keys_are_a_tech_failure_not_a_verdict(monkeypatch) -> None:
     """Without stubbing: the real ``build_pipeline`` needs provider API keys."""
     for name in ("GEMINI_API_KEY", "TYPESAFE_API_KEY", "FACTCHECK_API_KEY", "EUVSDISINFO_API_KEY"):
@@ -167,7 +183,7 @@ def test_picture_upload_is_accepted(file: FileField, stub_pipeline) -> None:
     response = post_check({"type": "image", "text": "Czy to zdjęcie jest aktualne?"}, file)
 
     assert response.status_code == 200
-    stub_pipeline.run_prepared.assert_called_once()
+    stub_pipeline.run_deferred.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -182,7 +198,7 @@ def test_video_upload_is_accepted(file: FileField, stub_pipeline) -> None:
     response = post_check({"type": "video"}, file)
 
     assert response.status_code == 200
-    stub_pipeline.run_prepared.assert_called_once()
+    stub_pipeline.run_deferred.assert_called_once()
 
 
 def test_picture_without_question_is_accepted(stub_pipeline) -> None:
@@ -270,3 +286,56 @@ def test_scenario_expected_outcome(scenario: Scenario) -> None:
     if "abstain" in scenario.tags:
         # No evidence: every claim abstains instead of guessing a verdict.
         assert all(claim["verdict"] == "insufficient_evidence" for claim in result["claims"])
+
+
+def test_pipeline_builds_with_only_the_gemini_key(monkeypatch) -> None:
+    """Evidence providers are optional: a missing key degrades the answer
+    (reported per claim), it does not disable checking."""
+    import asyncio
+
+    from prawdowid.api.dependencies import build_pipeline
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    for name in ("TYPESAFE_API_KEY", "FACTCHECK_API_KEY", "EUVSDISINFO_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    async def build():
+        async with build_pipeline() as pipeline:
+            return pipeline
+
+    pipeline = asyncio.run(build())
+
+    assert pipeline.evidence_search.google is None
+    assert pipeline.evidence_search.euvsdisinfo is None
+    assert pipeline.evidence_search.euvsdisinfo_connect is None
+    assert pipeline.evidence_search.gov_selector is None
+    assert pipeline.sublinks.decision is None
+
+
+def test_sources_include_their_publication_date(stub_pipeline) -> None:
+    from datetime import datetime, timezone
+
+    from prawdowid.domain.evidence import (
+        AssessmentReasons, ClaimAssessmentOutput, EvidenceForAssessment, EvidenceItem,
+    )
+    from prawdowid.services.pipeline import ClaimOutcome
+
+    item = EvidenceItem(
+        source="google_fact_check", kind="claim_review", title="Analiza", url="https://demagog.org.pl/a",
+        publisher="Demagog", rating="Fałsz", snippet="Teza jest fałszywa.",
+        published_at=datetime(2026, 3, 1, tzinfo=timezone.utc),
+    )
+    assessment = ClaimAssessmentOutput(
+        claim_id="c1", verdict="false", strength="strong",
+        reasons=AssessmentReasons(source_tiers=[2], independent_sources=1, conflicting_sources=False),
+        explanation="Fałsz.", citations=[{"evidence_index": 0, "quote": "Teza jest fałszywa.", "relation": "refutes"}],
+    )
+    outcome = ClaimOutcome("c1", "Teza.", "factual_claim", assessment, "model:t",
+                           [EvidenceForAssessment(item=item, text=item.snippet, fully_fetched=False)])
+    stub_pipeline.run_text.return_value = PipelineResult(uuid.uuid4(), uuid.uuid4(), RunStatus.OK, claims=[outcome])
+
+    body = post_check({"type": "text", "text": "Teza."}).json()
+
+    source = body["claims"][0]["sources"][0]
+    assert source["published_at"].startswith("2026-03-01")
+    assert {"title", "publisher", "url", "quote"} <= set(source)

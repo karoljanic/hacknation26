@@ -32,6 +32,7 @@ from prawdowid.persistence.models import Claim, Submission, SubmissionClaim, Ver
 from prawdowid.security.redaction import redact
 from prawdowid.services.claims import ClaimExtractor, is_open_question
 from prawdowid.services.preparation import InputPreparer, NoExtractableContentError
+from prawdowid.services.usage import estimate_cost, model_prices, usage_entry
 
 PIPELINE_VERSION = "intake-0.1"
 
@@ -62,6 +63,10 @@ class StoredClaim:
     general_knowledge: bool = False
     ambiguities: tuple[str, ...] = ()
     open_question: bool = False
+    # Verbatim (redacted) input passages this claim was extracted from.
+    source_quotes: tuple[str, ...] = ()
+    # English rendering from the extractor, for searching English sources.
+    text_en: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +90,7 @@ class ClaimIntake:
         embedder: EmbeddingAdapter | None = None,
         similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
         retention: timedelta = timedelta(days=30),
+        keep_run_open: bool = False,
     ) -> None:
         self.session_factory = session_factory
         self.preparer = preparer
@@ -92,6 +98,11 @@ class ClaimIntake:
         self.embedder = embedder
         self.similarity_threshold = similarity_threshold
         self.retention = retention
+        # True when a later stage (VerificationPipeline) continues the run: a
+        # successful intake then records its usage but leaves the run
+        # ``running``, so a crash mid-check never leaves an "ok" run without
+        # verdicts. The later stage closes it.
+        self.keep_run_open = keep_run_open
 
     # -- entry points (one per input type) -------------------------------- #
 
@@ -115,6 +126,18 @@ class ClaimIntake:
             url=url,
             sender_hash=sender_hash,
         )
+
+    def submit_deferred(
+        self,
+        prepare: Callable[[], PreparedInput],
+        *,
+        channel: Channel,
+        url: str | None = None,
+        sender_hash: str | None = None,
+    ) -> IntakeResult:
+        """Runs ``prepare`` (fetching a URL, reading media) *after* the run row
+        is opened, so its failures are recorded like any other stage's."""
+        return self._process(prepare, channel=channel, redacted_text=None, url=url, sender_hash=sender_hash)
 
     def submit_prepared(
         self, prepared: PreparedInput, *, channel: Channel, sender_hash: str | None = None
@@ -178,10 +201,10 @@ class ClaimIntake:
                                redacted_text=redacted_text)
 
         stored = self._store_claims(submission_id, extraction, embeddings)
-        result = self._close(submission_id, run_id, started, models, RunStatus.OK, None,
-                             redacted_text=redacted_text)
+        self._close(submission_id, run_id, started, models, RunStatus.OK, None,
+                    redacted_text=redacted_text, finish=not self.keep_run_open)
         input_text = "\n\n".join(segment.text for segment in prepared.segments)
-        return IntakeResult(submission_id, run_id, result.status, stored, input_text=input_text)
+        return IntakeResult(submission_id, run_id, RunStatus.OK, stored, input_text=input_text)
 
     @staticmethod
     def _redact_segments(prepared: PreparedInput) -> PreparedInput:
@@ -280,6 +303,8 @@ class ClaimIntake:
                         ambiguities=tuple(extracted.ambiguities),
                         open_question=kind == ClaimKind.VERIFICATION_QUESTION
                         and (extracted.open_question or is_open_question(extracted.text)),
+                        source_quotes=tuple(ref.quote for ref in extracted.references if ref.quote.strip()),
+                        text_en=(extracted.text_en or "").strip() or None,
                     )
                 )
         return stored
@@ -325,13 +350,16 @@ class ClaimIntake:
         *,
         error: str | None = None,
         redacted_text: str | None = None,
+        finish: bool = True,
     ) -> IntakeResult:
         with self.session_factory() as session, session.begin():
             run = session.get_one(VerificationRun, run_id)
-            run.status = status
-            run.finished_at = datetime.now(timezone.utc)
-            run.latency_ms = int((time.monotonic() - started) * 1000)
             run.models = models
+            if finish:
+                run.status = status
+                run.finished_at = datetime.now(timezone.utc)
+                run.latency_ms = int((time.monotonic() - started) * 1000)
+                run.est_cost_usd = estimate_cost(models, model_prices())
             run.error = error
             if redacted_text is not None:
                 submission = session.get_one(Submission, submission_id)
@@ -340,13 +368,4 @@ class ClaimIntake:
         return IntakeResult(submission_id, run_id, status, message=message)
 
 
-def _usage(
-    role: str, model: str, version: str | None, input_tokens: int | None, output_tokens: int | None
-) -> dict[str, Any]:
-    return {
-        "role": role,
-        "model": model,
-        "model_version": version,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-    }
+_usage = usage_entry

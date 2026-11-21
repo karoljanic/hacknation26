@@ -17,6 +17,7 @@ from prawdowid.services.assessment import (
     AssessmentGenerator,
     no_evidence_assessment,
     opinion_assessment,
+    with_unavailable_sources,
 )
 
 
@@ -65,14 +66,17 @@ def test_valid_assessment_with_verified_citation_passes_through() -> None:
     assert "Demagog" in prompt
 
 
-def test_fabricated_quote_is_rejected() -> None:
+def test_fabricated_quote_makes_the_claim_abstain() -> None:
     llm = Mock()
     llm.generate_structured.return_value = output(
         citations=[{"evidence_index": 0, "quote": "Zdanie, którego nie ma w źródle.", "relation": "refutes"}]
     )
 
-    with pytest.raises(RuntimeError, match="absent"):
-        AssessmentGenerator(llm=llm).assess([bundle()])
+    result = AssessmentGenerator(llm=llm).assess([bundle()])
+
+    assessment = result.data.assessments[0]
+    assert assessment.verdict == "insufficient_evidence"
+    assert assessment.citations == []
 
 
 def test_invalid_quote_is_retried_once_and_a_valid_answer_is_used() -> None:
@@ -86,61 +90,92 @@ def test_invalid_quote_is_retried_once_and_a_valid_answer_is_used() -> None:
 
     assert llm.generate_structured.call_count == 2
     assert result.data.assessments[0].citations[0].quote == "Demagog ocenił tezę jako fałsz."
+    assert result.input_tokens == 2  # usage of both attempts is counted
 
 
-def test_two_invalid_answers_still_fail_instead_of_returning_a_verdict() -> None:
+def test_two_invalid_answers_abstain_instead_of_returning_an_unchecked_verdict() -> None:
     llm = Mock()
     llm.generate_structured.return_value = output(
         citations=[{"evidence_index": 0, "quote": "Parafraza, nie cytat.", "relation": "refutes"}]
     )
 
-    with pytest.raises(RuntimeError, match="absent"):
-        AssessmentGenerator(llm=llm).assess([bundle()])
+    result = AssessmentGenerator(llm=llm).assess([bundle()])
 
     assert llm.generate_structured.call_count == 2
+    assert result.data.assessments[0].verdict == "insufficient_evidence"
 
 
-def test_definitive_verdict_without_citation_is_rejected() -> None:
+def test_one_invalid_claim_does_not_discard_the_others() -> None:
+    def two_claims(bad_quote: str) -> StructuredResult[SubmissionAssessmentOutput]:
+        good = output().data.assessments[0].model_dump()
+        bad = {**good, "claim_id": "c2",
+               "citations": [{"evidence_index": 0, "quote": bad_quote, "relation": "refutes"}]}
+        data = SubmissionAssessmentOutput.model_validate({"assessments": [good, bad]})
+        return StructuredResult(data=data, requested_model="t", model_version=None, input_tokens=1, output_tokens=1)
+
+    retry = output(claim_id="c2", citations=[{"evidence_index": 0, "quote": "Parafraza.", "relation": "refutes"}])
+    llm = Mock()
+    llm.generate_structured.side_effect = [two_claims("Parafraza."), retry]
+
+    result = AssessmentGenerator(llm=llm).assess([bundle("c1"), bundle("c2")])
+
+    verdicts = {a.claim_id: a.verdict for a in result.data.assessments}
+    assert verdicts == {"c1": "false", "c2": "insufficient_evidence"}
+    # The retry only re-asks about the claim that failed.
+    retry_prompt = llm.generate_structured.call_args_list[1].args[0]
+    assert '"c2"' in retry_prompt and '"c1"' not in retry_prompt
+
+
+def test_definitive_verdict_without_citation_abstains() -> None:
     llm = Mock()
     llm.generate_structured.return_value = output(citations=[])
 
-    with pytest.raises(RuntimeError, match="requires at least one citation"):
-        AssessmentGenerator(llm=llm).assess([bundle()])
+    result = AssessmentGenerator(llm=llm).assess([bundle()])
+
+    assert result.data.assessments[0].verdict == "insufficient_evidence"
 
 
-def test_out_of_range_evidence_index_is_rejected() -> None:
+def test_out_of_range_evidence_index_abstains() -> None:
     llm = Mock()
     llm.generate_structured.return_value = output(citations=[{"evidence_index": 5, "quote": "x", "relation": "refutes"}])
 
-    with pytest.raises(RuntimeError, match="unknown evidence"):
-        AssessmentGenerator(llm=llm).assess([bundle()])
+    result = AssessmentGenerator(llm=llm).assess([bundle()])
+
+    assert result.data.assessments[0].verdict == "insufficient_evidence"
 
 
-def test_missing_claim_in_response_is_rejected() -> None:
+def test_claim_missing_from_the_response_is_retried_then_abstains() -> None:
     llm = Mock()
     data = SubmissionAssessmentOutput.model_validate({"assessments": []})
     llm.generate_structured.return_value = StructuredResult(
         data=data, requested_model="t", model_version=None, input_tokens=None, output_tokens=None
     )
 
-    with pytest.raises(RuntimeError, match="exactly the submitted claims"):
-        AssessmentGenerator(llm=llm).assess([bundle()])
+    result = AssessmentGenerator(llm=llm).assess([bundle()])
+
+    assert llm.generate_structured.call_count == 2
+    assert [a.verdict for a in result.data.assessments] == ["insufficient_evidence"]
 
 
-def test_injection_note_must_quote_real_evidence_text() -> None:
+def test_injection_note_not_quoting_real_evidence_is_dropped() -> None:
     llm = Mock()
     data = SubmissionAssessmentOutput.model_validate(
         {
             **output().data.model_dump(),
-            "injection_notes": [{"claim_id": "c1", "evidence_index": 0, "excerpt": "nie ma takiego tekstu"}],
+            "injection_notes": [
+                {"claim_id": "c1", "evidence_index": 0, "excerpt": "nie ma takiego tekstu"},
+                {"claim_id": "c1", "evidence_index": 0, "excerpt": "Demagog ocenił"},
+            ],
         }
     )
     llm.generate_structured.return_value = StructuredResult(
         data=data, requested_model="t", model_version=None, input_tokens=None, output_tokens=None
     )
 
-    with pytest.raises(RuntimeError, match="Injection note"):
-        AssessmentGenerator(llm=llm).assess([bundle()])
+    result = AssessmentGenerator(llm=llm).assess([bundle()])
+
+    assert result.data.assessments[0].verdict == "false"
+    assert [note.excerpt for note in result.data.injection_notes] == ["Demagog ocenił"]
 
 
 def test_empty_bundle_list_is_rejected() -> None:
@@ -266,8 +301,11 @@ def test_quote_with_changed_words_is_still_rejected() -> None:
         citations=[{"evidence_index": 0, "quote": "Demagog ocenił tezę jako prawdę.", "relation": "refutes"}]
     )
 
-    with pytest.raises(RuntimeError, match="absent"):
-        AssessmentGenerator(llm=llm).assess([bundle()])
+    # Rejected (twice) -> this claim abstains instead of keeping an unchecked verdict.
+    assessment = AssessmentGenerator(llm=llm).assess([bundle()]).data.assessments[0]
+
+    assert assessment.verdict == "insufficient_evidence"
+    assert assessment.citations == []
 
 
 def announcement_bundle(claim_text: str) -> ClaimEvidenceBundle:
@@ -396,3 +434,31 @@ def test_prompt_states_today_so_the_model_can_reason_about_the_present() -> None
     AssessmentGenerator(llm=llm, today=lambda: date(2026, 11, 21)).assess([bundle()])
 
     assert '"today": "2026-11-21"' in llm.generate_structured.call_args.args[0]
+
+
+def test_unavailable_sources_are_added_to_the_limitations() -> None:
+    assessment = output().data.assessments[0].model_copy(update={"limitations": "Stare źródło."})
+
+    updated = with_unavailable_sources(assessment, ["euvsdisinfo"])
+
+    assert updated.limitations.startswith("Stare źródło. ")
+    assert "EUvsDisinfo" in updated.limitations
+    assert with_unavailable_sources(assessment, []) is assessment
+
+
+def test_quote_differing_only_in_non_breaking_spaces_is_accepted_and_stored_verbatim() -> None:
+    source_text = "Z\xa0takiej ulgi korzystają seniorzy i\xa0seniorki."
+    nbsp_bundle = ClaimEvidenceBundle(
+        claim_id="c1", claim_text="Teza.", claim_kind="factual_claim", evidence=[evidence(source_text)]
+    )
+    llm = Mock()
+    llm.generate_structured.return_value = output(
+        citations=[{"evidence_index": 0, "quote": "Z takiej ulgi korzystają seniorzy i seniorki.", "relation": "refutes"}]
+    )
+
+    result = AssessmentGenerator(llm=llm).assess([nbsp_bundle])
+
+    assessment = result.data.assessments[0]
+    assert assessment.verdict == "false"
+    assert assessment.citations[0].quote == source_text
+    assert llm.generate_structured.call_count == 1

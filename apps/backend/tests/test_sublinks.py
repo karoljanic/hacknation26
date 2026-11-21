@@ -104,3 +104,35 @@ def test_odyseusz_items_are_never_fetched_and_count_as_full_text() -> None:
     assert len(decision.decide.call_args.args[1]) == 1
     assert bundle[0].fully_fetched is True and bundle[0].text == "Pełny komunikat MSZ."
     assert bundle[1].text == "Pełna treść artykułu."
+
+
+def test_without_a_decision_provider_snippets_are_used() -> None:
+    items = [item("https://demagog.org.pl/a")]
+    preparer = Mock()
+
+    bundle = SublinkSelector(decision=None, preparer=preparer).select("Teza.", items)
+
+    assert [entry.text for entry in bundle] == ["Krótki fragment."]
+    preparer.prepare_url.assert_not_called()
+
+
+def test_decision_failure_falls_back_to_snippets_without_raising() -> None:
+    items = [item("https://demagog.org.pl/a")]
+    decision = Mock()
+    decision.decide.side_effect = RuntimeError("TypeSafe down")
+
+    bundle = SublinkSelector(decision=decision, preparer=Mock()).select("Teza.", items)
+
+    assert bundle[0].fully_fetched is False
+
+
+def test_http_error_on_fetch_falls_back_to_snippet() -> None:
+    items = [item("https://demagog.org.pl/a")]
+    decision = Mock()
+    decision.decide.return_value = decision_result([0.9])
+    preparer = Mock()
+    preparer.prepare_url.side_effect = RuntimeError("Request failed with HTTP 403")
+
+    bundle = SublinkSelector(decision=decision, preparer=preparer, threshold=0.5).select("Teza.", items)
+
+    assert bundle[0].fully_fetched is False

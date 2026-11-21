@@ -36,6 +36,8 @@ For each factual_claim and verification_question also give:
   questions such as "Czy bitwa pod Grunwaldem była w 1410 roku?". Keep an open
   question as asked; do not turn it into a yes/no claim.
 Leave these empty or false for opinions.
+For every item also give text_en: a faithful English translation of its text
+(same meaning, names, numbers and negations), used only to search English sources.
 """
 
 

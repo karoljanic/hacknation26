@@ -12,7 +12,13 @@ type Verdict = "confirmed" | "false" | "misleading" | "insufficient_evidence" | 
 type Strength = "strong" | "moderate" | "weak";
 type RunStatus = "pending" | "running" | "ok" | "tech_failure" | "needs_clarification" | "out_of_scope";
 
-type Source = { title: string; url: string; publisher: string; quote: string | null };
+type Source = {
+  title: string;
+  url: string;
+  publisher: string;
+  published_at: string | null;
+  quote: string | null;
+};
 
 type Claim = {
   text: string;
@@ -523,6 +529,12 @@ function ClaimResult({ claim }: { claim: Claim }) {
                   {source.title}
                 </a>
                 <span className="source__publisher"> – {source.publisher}</span>
+                {source.published_at && (
+                  <time className="source__date" dateTime={source.published_at}>
+                    {", "}
+                    {new Date(source.published_at).toLocaleDateString("pl-PL")}
+                  </time>
+                )}
                 {source.quote && <blockquote className="source__quote">„{source.quote}”</blockquote>}
               </li>
             ))}

@@ -39,6 +39,13 @@ class ClaimForVerification(BaseModel):
     # Details extraction found missing (who, when, where, which document).
     ambiguities: list[str] = Field(default_factory=list)
     open_question: bool = False
+    # Verbatim passages of the user's input the claim was extracted from. The
+    # extractor rewords claims ("65-latkowie" -> "osoby w wieku 65 lat"), and
+    # fact-check search often only matches the original wording.
+    source_quotes: list[str] = Field(default_factory=list)
+    # English rendering for English-language sources (EUvsDisinfo's registry
+    # is in English); None falls back to ``text``.
+    text_en: str | None = None
 
 
 class EvidenceItem(BaseModel):
@@ -62,6 +69,9 @@ class EvidenceItem(BaseModel):
     rating: str | None = None
     snippet: str = Field(min_length=1)
     published_at: datetime | None = None
+    # Language of the item's text (ISO 639-1), when the provider makes it
+    # known; None falls back to the catalogued source's language.
+    lang: str | None = Field(default=None, max_length=8)
 
 
 class ClaimEvidence(BaseModel):

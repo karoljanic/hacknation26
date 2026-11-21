@@ -123,4 +123,5 @@ def _to_evidence_item(entry: SourceEntry, doc: CorpusDocument) -> EvidenceItem:
         catalog_slug=entry.slug,
         snippet=doc.text[:SNIPPET_CHARS] or doc.title,
         published_at=doc.published_at,
+        lang="pl",
     )
