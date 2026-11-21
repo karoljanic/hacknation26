@@ -3,16 +3,19 @@ import json
 import os
 from pathlib import Path
 
+import httpx
 from google import genai
 from google.genai import types
 from pydantic import TypeAdapter
 
 from prawdowid.ai.adapters.media import Media
 from prawdowid.ai.instances.gemini import GeminiAdapter
+from prawdowid.adapters.sources.google_fact_check import GoogleFactCheckAdapter
 from prawdowid.adapters.sources.web import PublicWebFetcher
 from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.preparation import PreparedInput
 from prawdowid.services.claims import ClaimExtractor
+from prawdowid.services.fact_checks import FactCheckTool
 from prawdowid.services.preparation import MAX_MEDIA_BYTES, InputPreparer
 
 MIME_BY_SUFFIX = {
@@ -43,7 +46,13 @@ def main() -> None:
     inputs.add_argument("--segments", type=Path, help="JSON file containing normalized segments")
     parser.add_argument("--model", default="gemini-2.5-flash")
     parser.add_argument("--preparation-model", default="gemini-2.5-flash")
+    parser.add_argument(
+        "--fact-check", action="store_true", help="Search extracted claims in Google Fact Check"
+    )
     args = parser.parse_args()
+    fact_check_key = os.environ["FACTCHECK_API_KEY"] if args.fact_check else None
+    if fact_check_key is not None and not fact_check_key.strip():
+        raise ValueError("Google Fact Check API key must not be empty")
 
     with genai.Client(
         api_key=os.environ["GEMINI_API_KEY"],
@@ -76,21 +85,26 @@ def main() -> None:
             )
         result = ClaimExtractor(GeminiAdapter(client, args.model)).extract(prepared.segments)
 
-    print(
-        json.dumps(
-            {
-                "segments": [segment.model_dump(mode="json") for segment in prepared.segments],
-                "preparation": prepared.model_dump(mode="json", exclude={"segments"}),
-                "extraction": result.data.model_dump(mode="json"),
-                "requested_model": result.requested_model,
-                "model_version": result.model_version,
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
+    fact_checks = None
+    if fact_check_key is not None:
+        with httpx.Client() as http_client:
+            source = GoogleFactCheckAdapter(
+                client=http_client, api_key=fact_check_key
+            )
+            fact_checks = FactCheckTool(source).search_claims(result.data)
+
+    output = {
+        "segments": [segment.model_dump(mode="json") for segment in prepared.segments],
+        "preparation": prepared.model_dump(mode="json", exclude={"segments"}),
+        "extraction": result.data.model_dump(mode="json"),
+        "requested_model": result.requested_model,
+        "model_version": result.model_version,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+    }
+    if fact_checks is not None:
+        output["fact_checks"] = fact_checks.model_dump(mode="json")
+    print(json.dumps(output, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
