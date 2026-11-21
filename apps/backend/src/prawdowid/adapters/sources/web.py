@@ -15,6 +15,17 @@ class FetchedArticle:
     body: bytes
     fetched_at: datetime
     encoding: str | None = None
+    status_code: int = 200
+
+
+@dataclass(frozen=True)
+class FetchedResource:
+    url: str
+    body: bytes
+    fetched_at: datetime
+    content_type: str
+    encoding: str | None = None
+    status_code: int = 200
 
 
 class ArticleFetcher(Protocol):
@@ -32,15 +43,53 @@ def _is_public_address(value: str) -> bool:
 
 class PublicWebFetcher:
     def __init__(
-        self, *, timeout: float = 10, max_bytes: int = 2_000_000, max_redirects: int = 3
+        self,
+        *,
+        timeout: float = 10,
+        max_bytes: int = 2_000_000,
+        max_redirects: int = 3,
+        user_agent: str = "Prawdowid/0.1 (article extraction)",
     ) -> None:
-        if timeout <= 0 or max_bytes <= 0 or max_redirects < 0:
+        if timeout <= 0 or max_bytes <= 0 or max_redirects < 0 or not user_agent.strip():
             raise ValueError("Invalid fetch limits")
         self.timeout = timeout
         self.max_bytes = max_bytes
         self.max_redirects = max_redirects
+        self.user_agent = user_agent
 
-    def fetch(self, url: str) -> FetchedArticle:
+    def fetch(self, url: str, *, allowed_hosts: set[str] | None = None) -> FetchedArticle:
+        resource = self.fetch_resource(
+            url,
+            allowed_hosts=allowed_hosts,
+            accepted_content_types={"text/html", "application/xhtml+xml"},
+            accept_header="text/html, application/xhtml+xml",
+            content_type_description="HTML article",
+        )
+        return FetchedArticle(
+            url=resource.url,
+            body=resource.body,
+            fetched_at=resource.fetched_at,
+            encoding=resource.encoding,
+            status_code=resource.status_code,
+        )
+
+    def fetch_resource(
+        self,
+        url: str,
+        *,
+        allowed_hosts: set[str] | None,
+        accepted_content_types: set[str],
+        accept_header: str = "*/*",
+        content_type_description: str = "resource",
+    ) -> FetchedResource:
+        if (
+            not accepted_content_types
+            or not accept_header.strip()
+            or not content_type_description.strip()
+        ):
+            raise ValueError(
+                "Content types, Accept header, and response description must be non-blank"
+            )
         deadline = time.monotonic() + self.timeout
         for hop in range(self.max_redirects + 1):
             parsed = urlsplit(url)
@@ -56,6 +105,11 @@ class PublicWebFetcher:
             if port not in {80, 443}:
                 raise ValueError("Only HTTP(S) ports 80 and 443 are supported")
             host = parsed.hostname.encode("idna").decode("ascii")
+            if allowed_hosts is not None and host.lower() not in {
+                allowed_host.encode("idna").decode("ascii").lower()
+                for allowed_host in allowed_hosts
+            }:
+                raise ValueError(f"URL left the allowed host set: {host}")
             addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
             if not addresses or any(
                 not _is_public_address(address[4][0]) for address in addresses
@@ -81,8 +135,12 @@ class PublicWebFetcher:
                     "GET",
                     path,
                     headers={
-                        "User-Agent": "Prawdowid/0.1 (article extraction)",
-                        "Accept": "text/html, application/xhtml+xml",
+                        "User-Agent": self.user_agent,
+                        "Accept": (
+                            "text/plain"
+                            if parsed.path.lower().rstrip("/").endswith("/robots.txt")
+                            else accept_header
+                        ),
                         "Accept-Encoding": "identity",
                         "Connection": "close",
                     },
@@ -94,15 +152,32 @@ class PublicWebFetcher:
                         raise RuntimeError("Invalid redirect or redirect limit exceeded")
                     url = urljoin(url, location)
                     continue
+                is_robots_txt = parsed.path.lower().rstrip("/").endswith("/robots.txt")
+                if is_robots_txt and response.status in {404, 410}:
+                    return FetchedResource(
+                        url=url,
+                        body=b"",
+                        fetched_at=datetime.now(timezone.utc),
+                        content_type="text/plain",
+                        status_code=response.status,
+                    )
                 if response.status != 200:
-                    raise RuntimeError(f"Article request failed with HTTP {response.status}")
+                    raise RuntimeError(f"Request failed with HTTP {response.status}")
                 content_type = response.getheader("Content-Type", "").split(";")[0].strip().lower()
-                if content_type not in {"text/html", "application/xhtml+xml"}:
-                    raise ValueError("URL did not return an HTML article")
+                accepted_types = (
+                    accepted_content_types | {"text/plain"}
+                    if is_robots_txt
+                    else accepted_content_types
+                )
+                if content_type not in accepted_types:
+                    raise ValueError(
+                        f"URL did not return an accepted {content_type_description} "
+                        f"content type: {content_type or 'missing'}"
+                    )
                 if response.getheader("Content-Encoding", "identity").lower() != "identity":
-                    raise ValueError("Compressed article responses are not supported")
+                    raise ValueError("Compressed responses are not supported")
                 if response.length is not None and response.length > self.max_bytes:
-                    raise ValueError("Article exceeds the download size limit")
+                    raise ValueError("Response exceeds the download size limit")
                 body = bytearray()
                 while not response.isclosed():
                     transport_socket.settimeout(self._remaining(deadline))
@@ -111,14 +186,16 @@ class PublicWebFetcher:
                         break
                     body.extend(chunk)
                     if len(body) > self.max_bytes:
-                        raise ValueError("Article exceeds the download size limit")
+                        raise ValueError("Response exceeds the download size limit")
                 if response.length not in {None, 0}:
-                    raise RuntimeError("Article response ended before the declared content length")
-                return FetchedArticle(
+                    raise RuntimeError("Response ended before the declared content length")
+                return FetchedResource(
                     url=url,
                     body=bytes(body),
                     fetched_at=datetime.now(timezone.utc),
+                    content_type=content_type,
                     encoding=response.headers.get_content_charset(),
+                    status_code=response.status,
                 )
             finally:
                 if response is not None:

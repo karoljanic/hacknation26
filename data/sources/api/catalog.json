@@ -1,0 +1,570 @@
+{
+  "reviewed_at": "2026-11-21",
+  "input": "links.md",
+  "schema_version": 1,
+  "status_definitions": {
+    "api": "Public, documented API for the source or its data.",
+    "rss": "Published RSS feed; usually summaries and links, not complete articles.",
+    "partial": "Related structured data exists, but full coverage of the listed page is unverified.",
+    "mcp": "Documented Model Context Protocol interface, not a conventional REST API.",
+    "none_found": "No public, documented machine-readable interface confirmed during this review."
+  },
+  "sources": [
+    {
+      "id": "001",
+      "title": "Odyseusz",
+      "url": "https://odyseusz.gov.pl/",
+      "interface": "none_found",
+      "coverage": "The public information site and travel service; no public data API confirmed.",
+      "auth": "unknown",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "Do not use private application endpoints or authenticated traveler data."
+    },
+    {
+      "id": "002",
+      "title": "Gov.pl warnings",
+      "url": "https://www.gov.pl/web/gov/ostrzezenia",
+      "interface": "none_found",
+      "coverage": "Interactive warnings view; no public documented API confirmed.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "The HTML crawl did not expose warning records."
+    },
+    {
+      "id": "003",
+      "title": "Gov.pl warnings - Mazowieckie view",
+      "url": "https://www.gov.pl/web/gov/ostrzezenia#/_/mazowieckie/wszystkie",
+      "interface": "none_found",
+      "coverage": "A regional view of source 002, not a separate data service.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "The URL fragment selects the UI view; it is not an API endpoint."
+    },
+    {
+      "id": "004",
+      "title": "Regional Warning System (RSO)",
+      "url": "https://www.gov.pl/web/mswia/regionalny-system-ostrzegania",
+      "interface": "api",
+      "coverage": "Public RSO notices, categories, regions, and notice details as XML or JSON.",
+      "auth": "public_xml_json; token_required_for_cap",
+      "docs": [
+        "https://komunikaty.tvp.pl/Info/Integration"
+      ],
+      "implementation": "source_api_runner",
+      "entrypoint": "https://komunikaty.tvp.pl/komunikatyxml/wszystkie/wszystkie/1?_format=json",
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/run_source_api.py --source 004",
+      "note": "RSO integration is hosted by TVP. CAP/OpenAPI access requires a token from the RSO administrator."
+    },
+    {
+      "id": "005",
+      "title": "Government Security Centre daily report",
+      "url": "https://www.gov.pl/web/rcb/raport-dobowy3",
+      "interface": "none_found",
+      "coverage": "Published daily-report articles.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "Use the article page unless an official feed is confirmed."
+    },
+    {
+      "id": "006",
+      "title": "State Fire Service headquarters news",
+      "url": "https://www.gov.pl/web/kgpsp/aktualnosci",
+      "interface": "none_found",
+      "coverage": "News articles.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API or feed confirmed."
+    },
+    {
+      "id": "007",
+      "title": "Polish Police news",
+      "url": "https://policja.pl/pol/aktualnosci",
+      "interface": "rss",
+      "coverage": "News headlines, summaries, and article links.",
+      "auth": "public",
+      "docs": [
+        "https://www.policja.pl/pol/rss"
+      ],
+      "implementation": "source_api_runner",
+      "entrypoint": "https://www.policja.pl/dokumenty/rss/1-rss-1.rss",
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/run_source_api.py --source 007",
+      "note": "RSS is structured but may not contain the full article text."
+    },
+    {
+      "id": "008",
+      "title": "Mazowieckie Police news",
+      "url": "https://mazowiecka.policja.gov.pl/ra/aktualnosci/aktualnosci",
+      "interface": "rss",
+      "coverage": "News headlines, summaries, and article links.",
+      "auth": "public",
+      "docs": [
+        "https://mazowiecka.policja.gov.pl/ra/aktualnosci/aktualnosci"
+      ],
+      "implementation": "source_api_runner",
+      "entrypoint": "https://mazowiecka.policja.gov.pl/dokumenty/rss/271-rss-o-1488.rss",
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/run_source_api.py --source 008",
+      "note": "RSS is structured but may not contain the full article text."
+    },
+    {
+      "id": "009",
+      "title": "Ministry of National Defence news",
+      "url": "https://www.gov.pl/web/obrona-narodowa/aktualnosci5",
+      "interface": "none_found",
+      "coverage": "News articles.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API or feed confirmed."
+    },
+    {
+      "id": "010",
+      "title": "Chief Sanitary Inspectorate warnings",
+      "url": "https://www.gov.pl/web/gis/ostrzezenia",
+      "interface": "none_found",
+      "coverage": "Official warning pages.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No official, documented API or feed confirmed; do not rely on third-party feeds as the source of record."
+    },
+    {
+      "id": "011",
+      "title": "National Atomic Energy Agency",
+      "url": "https://www.gov.pl/web/paa/panstwowa-agencja-atomistyki",
+      "interface": "none_found",
+      "coverage": "Agency information and publications.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "012",
+      "title": "PAA radiation monitoring map",
+      "url": "https://monitoring.paa.gov.pl/",
+      "interface": "partial",
+      "coverage": "An open dataset exists for gamma dose-rate measurements, but it is not confirmed as a complete or real-time replacement for the map.",
+      "auth": "public_dataset",
+      "docs": [
+        "https://dane.gov.pl/en/dataset/612,rozklad-mocy-dawki-promieniowania-gamma"
+      ],
+      "implementation": "not_available",
+      "note": "Do not infer or scrape an undocumented map-backend API."
+    },
+    {
+      "id": "013",
+      "title": "GIOŚ air quality portal",
+      "url": "https://powietrze.gios.gov.pl/pjp/",
+      "interface": "api",
+      "coverage": "Official air-quality station metadata, measurements, indexes, alerts, and selected historical/statistical data.",
+      "auth": "public; terms_and_rate_limits_apply",
+      "docs": [
+        "https://powietrze.gios.gov.pl/pjp/content/api?lang=en",
+        "https://api.gios.gov.pl/pjp-api/swagger-ui/"
+      ],
+      "implementation": "source_api_runner",
+      "entrypoints": [
+        "https://api.gios.gov.pl/pjp-api/v1/rest/station/findAll"
+      ],
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/run_source_api.py --source 013",
+      "note": "Use the v1 API. Older endpoints were retired; measurement data can be revised and are not continuously verified."
+    },
+    {
+      "id": "014",
+      "title": "CERT Polska communications",
+      "url": "https://moje.cert.pl/komunikaty/",
+      "interface": "rss",
+      "coverage": "Published CERT communications as a feed.",
+      "auth": "public",
+      "docs": [
+        "https://cert.pl/rss.xml"
+      ],
+      "implementation": "source_api_runner",
+      "entrypoint": "https://cert.pl/rss.xml",
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/run_source_api.py --source 014",
+      "note": "Confirm the current feed contents match the selected communications page."
+    },
+    {
+      "id": "015",
+      "title": "Ministry of Infrastructure",
+      "url": "https://www.gov.pl/web/infrastruktura",
+      "interface": "none_found",
+      "coverage": "Ministry information and publications.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "016",
+      "title": "Ministry of Infrastructure news",
+      "url": "https://www.gov.pl/web/infrastruktura/aktualnosci",
+      "interface": "none_found",
+      "coverage": "News articles.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API or feed confirmed."
+    },
+    {
+      "id": "017",
+      "title": "Passenger rights - Ministry of Infrastructure",
+      "url": "https://www.gov.pl/web/infrastruktura/prawa-pasazerow",
+      "interface": "none_found",
+      "coverage": "Guidance and passenger-rights information.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "Informational content; no public data API confirmed."
+    },
+    {
+      "id": "018",
+      "title": "Ministry of Infrastructure citizen helpline",
+      "url": "https://www.gov.pl/web/infrastruktura/infolinia-dla-obywatela",
+      "interface": "none_found",
+      "coverage": "Contact and helpline information.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "Informational content; no public data API confirmed."
+    },
+    {
+      "id": "019",
+      "title": "Ministry of Infrastructure contact details",
+      "url": "https://www.gov.pl/web/infrastruktura/dane-kontaktowe",
+      "interface": "none_found",
+      "coverage": "Contact information.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "Informational content; no public data API confirmed."
+    },
+    {
+      "id": "020",
+      "title": "GDDKiA road information",
+      "url": "https://drogi.gddkia.gov.pl/informacje-drogowe",
+      "interface": "partial",
+      "coverage": "Related current road-event data are published by KPD in DATEX II; not all page content is confirmed as covered.",
+      "auth": "registration_and_client_certificate",
+      "docs": [
+        "https://kpd.gddkia.gov.pl/index.php/pl/metadane-datex/",
+        "https://kpd.gddkia.gov.pl/index.php/pl/specyfikacja-techniczna/"
+      ],
+      "implementation": "not_available",
+      "note": "Traffic-events dataset is XML/SOAP using DATEX II. KPD marks it public but requires registration and client-certificate authentication."
+    },
+    {
+      "id": "021",
+      "title": "GDDKiA road-information map",
+      "url": "https://drogi.gddkia.gov.pl/mapy/mapa-informacji-drogowej",
+      "interface": "partial",
+      "coverage": "Related KPD DATEX II datasets may cover road events; map equivalence is unverified.",
+      "auth": "registration_and_client_certificate",
+      "docs": [
+        "https://kpd.gddkia.gov.pl/index.php/pl/metadane-datex/",
+        "https://kpd.gddkia.gov.pl/index.php/pl/specyfikacja-techniczna/"
+      ],
+      "implementation": "not_available",
+      "note": "Do not assume the API includes every map layer."
+    },
+    {
+      "id": "022",
+      "title": "GDDKiA road disruptions",
+      "url": "https://drogi.gddkia.gov.pl/informacje-drogowe/lista-utrudnien",
+      "interface": "partial",
+      "coverage": "KPD traffic-events dataset is a structured alternative for road disruptions.",
+      "auth": "registration_and_client_certificate",
+      "docs": [
+        "https://kpd.gddkia.gov.pl/index.php/pl/metadane-datex/",
+        "https://kpd.gddkia.gov.pl/index.php/pl/specyfikacja-techniczna/"
+      ],
+      "implementation": "not_available",
+      "note": "Dataset is XML/SOAP using DATEX II; verify availability and credentials before integration."
+    },
+    {
+      "id": "023",
+      "title": "GDDKiA road information helpline 19 111",
+      "url": "https://www.gov.pl/web/gddkia/informacja-drogowa---19-111",
+      "interface": "none_found",
+      "coverage": "Helpline information.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "Informational content; no public data API confirmed."
+    },
+    {
+      "id": "024",
+      "title": "Civil Aviation Authority",
+      "url": "https://ulc.gov.pl/",
+      "interface": "none_found",
+      "coverage": "Agency information and publications.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "025",
+      "title": "Civil Aviation Authority passenger rights",
+      "url": "https://ulc.gov.pl/prawa-pasazera",
+      "interface": "none_found",
+      "coverage": "Passenger-rights information and links.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "Informational content; no public data API confirmed."
+    },
+    {
+      "id": "026",
+      "title": "Civil Aviation Authority passenger guide",
+      "url": "https://ulc.gov.pl/prawa-pasazera/poradnik-dla-pasazerow",
+      "interface": "none_found",
+      "coverage": "Passenger guidance pages.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "Informational content; no public data API confirmed."
+    },
+    {
+      "id": "027",
+      "title": "Passenger Portal",
+      "url": "https://portalpasazera.pl/",
+      "interface": "partial",
+      "coverage": "A related PLK OpenData API documents station, schedule, real-time operation, and disruption data; equivalence to the whole Passenger Portal is unverified.",
+      "auth": "api_key_required",
+      "docs": [
+        "https://pdp-api.plk-sa.pl/api-documentation"
+      ],
+      "implementation": "not_available",
+      "note": "Request an API key through the documented service. Do not assume portalpasazera.pl is the API host."
+    },
+    {
+      "id": "028",
+      "title": "Passenger information - Office of Rail Transport",
+      "url": "https://utk.gov.pl/pl/pasazerowie",
+      "interface": "none_found",
+      "coverage": "Passenger-rights and guidance information.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "029",
+      "title": "Railway Protection Guard",
+      "url": "https://kgsok.pl/",
+      "interface": "none_found",
+      "coverage": "Institutional information and publications.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "030",
+      "title": "Maritime Search and Rescue Service",
+      "url": "https://www.sar.gov.pl/",
+      "interface": "none_found",
+      "coverage": "Service information and publications.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "031",
+      "title": "Maritime Office in Gdynia",
+      "url": "https://www.umgdy.gov.pl/",
+      "interface": "none_found",
+      "coverage": "Office information and notices.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "032",
+      "title": "Navigation conditions - Maritime Office in Szczecin",
+      "url": "https://www.ums.gov.pl/bezpieczenstwo-morskie/warunki-zeglugi",
+      "interface": "none_found",
+      "coverage": "Navigation condition information.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "033",
+      "title": "Inland navigation notices - Polish Waters",
+      "url": "https://www.gov.pl/web/wody-polskie/komunikaty-nawigacyjne",
+      "interface": "none_found",
+      "coverage": "Navigation notices and linked documents.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "034",
+      "title": "IMGW Meteo",
+      "url": "https://meteo.imgw.pl/",
+      "interface": "partial",
+      "coverage": "IMGW public API provides selected synoptic/meteo observations, warnings, and file products; full website forecast/map coverage is unverified.",
+      "auth": "public; terms_apply",
+      "docs": [
+        "https://dane.imgw.pl/apiinfo"
+      ],
+      "implementation": "source_api_runner",
+      "entrypoints": [
+        "https://danepubliczne.imgw.pl/api/data/synop",
+        "https://danepubliczne.imgw.pl/api/data/meteo/",
+        "https://danepubliczne.imgw.pl/api/data/warningsmeteo",
+        "https://danepubliczne.imgw.pl/api/data/product"
+      ],
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/run_source_api.py --source 034",
+      "note": "Match the exact required product before replacing a page or map."
+    },
+    {
+      "id": "035",
+      "title": "IMGW Hydro",
+      "url": "https://hydro.imgw.pl/",
+      "interface": "partial",
+      "coverage": "IMGW public API provides selected hydrological observations and warnings; full website map/product coverage is unverified.",
+      "auth": "public; terms_apply",
+      "docs": [
+        "https://dane.imgw.pl/apiinfo"
+      ],
+      "implementation": "source_api_runner",
+      "entrypoints": [
+        "https://danepubliczne.imgw.pl/api/data/hydro/",
+        "https://danepubliczne.imgw.pl/api/data/warningshydro",
+        "https://danepubliczne.imgw.pl/api/data/product"
+      ],
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/run_source_api.py --source 035",
+      "note": "Match the exact required product before replacing a page or map."
+    },
+    {
+      "id": "036",
+      "title": "IMGW Baltic",
+      "url": "https://baltyk.imgw.pl/",
+      "interface": "partial",
+      "coverage": "The IMGW public API and file catalog may provide related marine products, but no endpoint equivalent to the whole Baltic service was confirmed.",
+      "auth": "public; terms_apply",
+      "docs": [
+        "https://dane.imgw.pl/apiinfo"
+      ],
+      "implementation": "not_available",
+      "note": "Verify product availability and update frequency before relying on the general IMGW API."
+    },
+    {
+      "id": "037",
+      "title": "Government Security Centre",
+      "url": "https://www.gov.pl/web/rcb/strona-glowna-rzadowego-centrum-bezpieczenstwa",
+      "interface": "none_found",
+      "coverage": "RCB news and communications.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No current public documented API or feed confirmed."
+    },
+    {
+      "id": "038",
+      "title": "Ministry of Interior and Administration",
+      "url": "https://www.gov.pl/web/mswia",
+      "interface": "none_found",
+      "coverage": "Ministry information and publications.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API or feed confirmed."
+    },
+    {
+      "id": "039",
+      "title": "Travel information - Ministry of Foreign Affairs",
+      "url": "https://www.gov.pl/web/dyplomacja/informacje-dla-podrozujacych",
+      "interface": "none_found",
+      "coverage": "Travel advisories and country information.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API confirmed."
+    },
+    {
+      "id": "040",
+      "title": "Prime Minister",
+      "url": "https://www.gov.pl/web/premier",
+      "interface": "none_found",
+      "coverage": "News and institutional information.",
+      "auth": "none_confirmed",
+      "docs": [],
+      "implementation": "not_available",
+      "note": "No public documented API or feed confirmed."
+    },
+    {
+      "id": "041",
+      "title": "Google Fact Check Explorer",
+      "url": "https://toolbox.google.com/factcheck/explorer/search/list:recent;hl=pl",
+      "interface": "partial",
+      "coverage": "The Explorer is a web UI; use the documented API in source 042 for supported fact-check searches.",
+      "auth": "api_key_required_for_api",
+      "docs": [
+        "https://developers.google.com/fact-check/tools/api/reference/rest?hl=pl"
+      ],
+      "implementation": "existing_adapter_for_related_api",
+      "note": "The API returns existing claim reviews, not an independent truth verdict."
+    },
+    {
+      "id": "042",
+      "title": "Google Fact Check Tools API",
+      "url": "https://developers.google.com/fact-check/tools/api/reference/rest?hl=pl",
+      "interface": "api",
+      "coverage": "Documented text and image searches for existing fact-check claim reviews.",
+      "auth": "api_key_required",
+      "docs": [
+        "https://developers.google.com/fact-check/tools/api/reference/rest?hl=pl"
+      ],
+      "implementation": "existing",
+      "entrypoints": [
+        "https://factchecktools.googleapis.com/v1alpha1/claims:search",
+        "https://factchecktools.googleapis.com/v1alpha1/claims:imageSearch"
+      ],
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/fact_check_demo.py --query \"search terms\" --language pl",
+      "environment": [
+        "FACTCHECK_API_KEY"
+      ],
+      "note": "The adapter enforces a response-size limit and validates the response schema."
+    },
+    {
+      "id": "043",
+      "title": "EUvsDisinfo articles and cases",
+      "url": "https://euvsdisinfo.eu/public-docs/How_to_grab_all_Articles_and_Cases_from_disinfo.pdf",
+      "interface": "mcp",
+      "coverage": "Documented MCP tools for articles, cases, search, and narratives.",
+      "auth": "api_key_required_for_data_tools",
+      "docs": [
+        "https://euvsdisinfo.eu/public-docs/How_to_grab_all_Articles_and_Cases_from_disinfo.pdf"
+      ],
+      "implementation": "existing",
+      "entrypoint": "https://mcp.euvsd.info/mcp",
+      "run_from": "apps/backend",
+      "run_command": "PYTHONPATH=src python examples/euvsdisinfo_demo.py articles --limit 10",
+      "environment": [
+        "EUVSDISINFO_API_KEY"
+      ],
+      "note": "The health subcommand is public; data tools require authentication. This is Streamable HTTP MCP, not REST."
+    }
+  ]
+}

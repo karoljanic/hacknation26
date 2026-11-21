@@ -63,6 +63,34 @@ def test_https_keeps_original_hostname_for_tls(monkeypatch: pytest.MonkeyPatch) 
     assert wire.closed
 
 
+def test_fetch_resource_accepts_bounded_json_from_an_allowlisted_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b'{"ok":true}'
+    wire = WireSocket(
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n"
+        + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode()
+        + body
+    )
+    connector = Mock(return_value=wire)
+    monkeypatch.setattr(socket, "getaddrinfo", Mock(return_value=resolve("8.8.8.8")))
+    monkeypatch.setattr(socket, "create_connection", connector)
+
+    resource = PublicWebFetcher().fetch_resource(
+        "http://api.example/data",
+        allowed_hosts={"api.example"},
+        accepted_content_types={"application/json"},
+        accept_header="application/json",
+        content_type_description="JSON",
+    )
+
+    assert resource.body == body
+    assert resource.content_type == "application/json"
+    assert resource.status_code == 200
+    assert b"Accept: application/json\r\n" in wire.sent
+    assert connector.call_args.args[0] == ("8.8.8.8", 80)
+
+
 def test_connection_close_response_can_be_read_with_a_real_socket(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -105,6 +133,47 @@ def test_redirect_to_internal_network_is_rejected(monkeypatch: pytest.MonkeyPatc
     assert wire.closed and wire.response.closed
 
 
+def test_redirect_outside_allowed_hosts_is_rejected_before_dns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wire = WireSocket(b"HTTP/1.1 302 Found\r\nLocation: http://other.example/\r\n\r\n")
+    connector = Mock(return_value=wire)
+    resolver = Mock(return_value=resolve("8.8.8.8"))
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    monkeypatch.setattr(socket, "create_connection", connector)
+
+    with pytest.raises(ValueError, match="allowed host"):
+        PublicWebFetcher().fetch("http://news.example/", allowed_hosts={"news.example"})
+
+    assert resolver.call_count == 1
+    assert connector.call_count == 1
+    assert wire.closed and wire.response.closed
+
+
+def test_robots_txt_accepts_plain_text_and_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = [
+        WireSocket(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
+            b"Content-Length: 25\r\nConnection: close\r\n\r\nUser-agent: *\nDisallow: /"
+        ),
+        WireSocket(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+    ]
+    monkeypatch.setattr(socket, "getaddrinfo", Mock(return_value=resolve("8.8.8.8")))
+    monkeypatch.setattr(socket, "create_connection", Mock(side_effect=responses))
+    fetcher = PublicWebFetcher()
+
+    robots = fetcher.fetch("http://news.example/robots.txt")
+    missing = fetcher.fetch("http://news.example/robots.txt")
+
+    assert robots.body == b"User-agent: *\nDisallow: /"
+    assert robots.status_code == 200
+    assert missing.body == b""
+    assert missing.status_code == 404
+    assert all(wire.closed and wire.response.closed for wire in responses)
+
+
 @pytest.mark.parametrize(
     ("response", "message"),
     [
@@ -125,6 +194,24 @@ def test_invalid_or_oversized_response_is_explicit_error(
     with pytest.raises((ValueError, RuntimeError), match=message):
         PublicWebFetcher(max_bytes=5, max_redirects=0).fetch("http://news.example/")
     assert wire.closed and wire.response.closed
+
+
+def test_fetch_resource_rejects_unexpected_content_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wire = WireSocket(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 1\r\n\r\nx"
+    )
+    monkeypatch.setattr(socket, "getaddrinfo", Mock(return_value=resolve("8.8.8.8")))
+    monkeypatch.setattr(socket, "create_connection", Mock(return_value=wire))
+
+    with pytest.raises(ValueError, match="structured data content type"):
+        PublicWebFetcher().fetch_resource(
+            "http://api.example/data",
+            allowed_hosts={"api.example"},
+            accepted_content_types={"application/json"},
+            content_type_description="structured data",
+        )
 
 
 @pytest.mark.parametrize(

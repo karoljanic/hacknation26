@@ -5,7 +5,8 @@ COPY pyproject.toml alembic.ini ./
 COPY src ./src
 COPY examples ./examples
 RUN pip install --no-cache-dir . \
-    && useradd --create-home app
+    && useradd --create-home app \
+    && install -d -m 700 -o app -g app /home/app/.local/share/prawdowid
 
 USER app
 CMD ["uvicorn", "prawdowid.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
