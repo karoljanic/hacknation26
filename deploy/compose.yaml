@@ -7,6 +7,8 @@ x-worker: &worker
     RABBITMQ_HOST: rabbitmq
     RABBITMQ_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
     RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
   depends_on:
     rabbitmq:
       condition: service_healthy

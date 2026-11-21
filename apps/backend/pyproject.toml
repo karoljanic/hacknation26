@@ -8,8 +8,11 @@ version = "0.1.0"
 description = "Prawdowid API and worker foundation"
 requires-python = ">=3.10"
 dependencies = [
+    "beautifulsoup4>=4.12,<5",
     "celery>=5.4,<6",
     "fastapi>=0.115,<1",
+    "google-genai>=2.33,<3",
+    "typesafe-sdk>=0.7.5,<0.8",
     "uvicorn[standard]>=0.30,<1",
 ]
 
