@@ -12,6 +12,10 @@ x-worker: &worker
     FACTCHECK_API_KEY: ${FACTCHECK_API_KEY:-}
     EUVSDISINFO_API_KEY: ${EUVSDISINFO_API_KEY:-}
     DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    PRAWDOWID_CATALOG: /app/data/sources/catalog.toml
+  volumes:
+    # Source catalogue lives outside the backend build context; read-only.
+    - ../data/sources:/app/data/sources:ro
   depends_on:
     rabbitmq:
       condition: service_healthy
@@ -40,7 +44,10 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # Run as the rabbitmq user: run as root, the CLI creates a root-owned
+      # ~/.erlang.cookie if it runs before the server (Podman runs the first
+      # check immediately), and the server then fails with "eacces".
+      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -70,6 +77,9 @@ services:
   web:
     build:
       context: ../apps/web
+    environment:
+      # Used server-side by the web app's /api/check proxy route.
+      API_URL: http://api:8000
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
 
@@ -96,6 +106,10 @@ services:
   worker-ingestion:
     <<: *worker
     command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "ingestion", "--concurrency=1", "--hostname=ingestion@%h"]
+
+  worker-embedding:
+    <<: *worker
+    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "embedding", "--concurrency=1", "--hostname=embedding@%h"]
 
 volumes:
   postgres_data:

@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: prawdowid
+Version: 0.1.0
+Summary: Prawdowid API and worker foundation
+Requires-Python: >=3.11
+Requires-Dist: alembic<2,>=1.13
+Requires-Dist: beautifulsoup4<5,>=4.12
+Requires-Dist: celery<6,>=5.4
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: google-genai<3,>=2.33
+Requires-Dist: httpx<1,>=0.27
+Requires-Dist: mcp<2,>=1.30
+Requires-Dist: pgvector<1,>=0.3
+Requires-Dist: psycopg[binary]<4,>=3.2
+Requires-Dist: pypdf<7,>=5
+Requires-Dist: python-multipart<1,>=0.0.18
+Requires-Dist: sqlalchemy<3,>=2.0.30
+Requires-Dist: typesafe-sdk<0.8,>=0.7.5
+Requires-Dist: uvicorn[standard]<1,>=0.30
+Provides-Extra: test
+Requires-Dist: pytest<10,>=8; extra == "test"

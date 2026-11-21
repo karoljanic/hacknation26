@@ -1,0 +1,295 @@
+# Prawdowid source catalogue — the auditable list of sources the system may cite.
+#
+# Synced into the `source` table by `python -m prawdowid.ingestion sync-catalog`
+# (also done automatically before `ingest`). Rules:
+#   * qualification: every entry states its `inclusion_rule`; only official
+#     publishers (kind=official, tier 1), public data (public_data, tier 1) and
+#     fact-checkers / verified-information databases (fact_checker, tier 2)
+#     are listed;
+#   * update: each `ingest` run re-collects the source; unchanged pages are
+#     recognised by content hash, changed pages are stored as a new version;
+#     every run is logged in `ingestion_run`;
+#   * exclusion: removing an entry marks the source inactive (its documents are
+#     kept for the audit trail but no longer collected);
+#   * a source's status (e.g. EU sanctions) goes in `status_warning` and is
+#     shown as a neutral note — it never decides a verdict by itself.
+#
+# Fields: slug, name, publisher, kind (official|public_data|fact_checker|media),
+# domain (bare host), tier (1-3), license, inclusion_rule, homepage_url,
+# status_warning, lang, and [source.collect] = collector name + its parameters.
+# "do potwierdzenia" marks facts to verify at the next catalogue review.
+
+# --------------------------------------------------------------------------- #
+# Official: gov.pl (collector gov_pl; params: listing_urls, static_urls, limit)
+# --------------------------------------------------------------------------- #
+
+[[source]]
+slug = "gov-rcb"
+name = "Rządowe Centrum Bezpieczeństwa"
+publisher = "Rządowe Centrum Bezpieczeństwa"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — wyłączone z ochrony prawa autorskiego (art. 4 ustawy o prawie autorskim); pozostałe treści wg warunków serwisu gov.pl (do potwierdzenia)."
+inclusion_rule = "Organ administracji rządowej odpowiedzialny za zarządzanie kryzysowe; źródło pierwotne ostrzeżeń i raportów dobowych."
+homepage_url = "https://www.gov.pl/web/rcb"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = [
+  "https://www.gov.pl/web/rcb/raport-dobowy3",
+  "https://www.gov.pl/web/rcb/strona-glowna-rzadowego-centrum-bezpieczenstwa",
+]
+
+[[source]]
+slug = "gov-mswia"
+name = "Ministerstwo Spraw Wewnętrznych i Administracji"
+publisher = "MSWiA"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Ministerstwo — źródło pierwotne komunikatów o bezpieczeństwie wewnętrznym i systemach ostrzegania."
+homepage_url = "https://www.gov.pl/web/mswia"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = ["https://www.gov.pl/web/mswia"]
+static_urls = ["https://www.gov.pl/web/mswia/regionalny-system-ostrzegania"]
+
+[[source]]
+slug = "gov-mon"
+name = "Ministerstwo Obrony Narodowej"
+publisher = "MON"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Ministerstwo — źródło pierwotne komunikatów dotyczących obronności."
+homepage_url = "https://www.gov.pl/web/obrona-narodowa"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = ["https://www.gov.pl/web/obrona-narodowa/aktualnosci5"]
+
+[[source]]
+slug = "gov-premier"
+name = "Kancelaria Prezesa Rady Ministrów"
+publisher = "KPRM"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Urząd obsługujący Prezesa Rady Ministrów — źródło pierwotne stanowisk rządu."
+homepage_url = "https://www.gov.pl/web/premier"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = ["https://www.gov.pl/web/premier"]
+
+[[source]]
+slug = "gov-gis"
+name = "Główny Inspektorat Sanitarny"
+publisher = "GIS"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Organ inspekcji sanitarnej — źródło pierwotne ostrzeżeń publicznych (żywność, produkty)."
+homepage_url = "https://www.gov.pl/web/gis"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = ["https://www.gov.pl/web/gis/ostrzezenia"]
+
+[[source]]
+slug = "gov-paa"
+name = "Państwowa Agencja Atomistyki"
+publisher = "PAA"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Dozór jądrowy — źródło pierwotne informacji o sytuacji radiacyjnej."
+homepage_url = "https://www.gov.pl/web/paa"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = ["https://www.gov.pl/web/paa/panstwowa-agencja-atomistyki"]
+
+[[source]]
+slug = "gov-infrastruktura"
+name = "Ministerstwo Infrastruktury"
+publisher = "Ministerstwo Infrastruktury"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Ministerstwo — źródło pierwotne informacji o transporcie i prawach pasażerów."
+homepage_url = "https://www.gov.pl/web/infrastruktura"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = ["https://www.gov.pl/web/infrastruktura/aktualnosci"]
+static_urls = [
+  "https://www.gov.pl/web/infrastruktura/prawa-pasazerow",
+  "https://www.gov.pl/web/infrastruktura/infolinia-dla-obywatela",
+]
+
+[[source]]
+slug = "gov-kgpsp"
+name = "Komenda Główna Państwowej Straży Pożarnej"
+publisher = "KG PSP"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Służba państwowa — źródło pierwotne komunikatów o zdarzeniach i akcjach ratowniczych."
+homepage_url = "https://www.gov.pl/web/kgpsp"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = ["https://www.gov.pl/web/kgpsp/aktualnosci"]
+
+[[source]]
+slug = "gov-wody-polskie"
+name = "Państwowe Gospodarstwo Wodne Wody Polskie"
+publisher = "Wody Polskie"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Państwowa osoba prawna — źródło pierwotne komunikatów nawigacyjnych i hydrologicznych."
+homepage_url = "https://www.gov.pl/web/wody-polskie"
+[source.collect]
+collector = "gov_pl"
+limit = 8
+listing_urls = ["https://www.gov.pl/web/wody-polskie/komunikaty-nawigacyjne"]
+
+[[source]]
+slug = "gov-gddkia"
+name = "Generalna Dyrekcja Dróg Krajowych i Autostrad"
+publisher = "GDDKiA"
+kind = "official"
+domain = "gov.pl"
+tier = 1
+license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków gov.pl (do potwierdzenia)."
+inclusion_rule = "Zarządca dróg krajowych — źródło pierwotne informacji drogowej."
+homepage_url = "https://www.gov.pl/web/gddkia"
+[source.collect]
+collector = "gov_pl"
+static_urls = ["https://www.gov.pl/web/gddkia/informacja-drogowa---19-111"]
+
+# --------------------------------------------------------------------------- #
+# Fact-checkers via Google Fact Check Tools API (collector google_fact_check;
+# needs FACTCHECK_API_KEY; params: publisher_site, language_code, max_age_days,
+# page_size, max_pages). Stored: checked claim, claimant, rating, link — not
+# the article text.
+# --------------------------------------------------------------------------- #
+
+[[source]]
+slug = "fc-demagog"
+name = "Demagog"
+publisher = "Stowarzyszenie Demagog"
+kind = "fact_checker"
+domain = "demagog.org.pl"
+tier = 2
+license = "Metadane ClaimReview z Google Fact Check Tools API (warunki Google APIs); przechowywane: teza, ocena, link — bez treści artykułu."
+inclusion_rule = "Polska organizacja fact-checkingowa; członkostwo IFCN/EFCSN do potwierdzenia przy przeglądzie."
+homepage_url = "https://demagog.org.pl"
+[source.collect]
+collector = "google_fact_check"
+publisher_site = "demagog.org.pl"
+language_code = "pl"
+page_size = 50
+max_pages = 3
+
+[[source]]
+slug = "fc-afp-sprawdzam"
+name = "AFP Sprawdzam"
+publisher = "Agence France-Presse"
+kind = "fact_checker"
+domain = "sprawdzam.afp.com"
+tier = 2
+license = "Metadane ClaimReview z Google Fact Check Tools API (warunki Google APIs); przechowywane: teza, ocena, link — bez treści artykułu."
+inclusion_rule = "Polska redakcja fact-checkingowa agencji AFP; członkostwo IFCN/EFCSN do potwierdzenia przy przeglądzie."
+homepage_url = "https://sprawdzam.afp.com"
+[source.collect]
+collector = "google_fact_check"
+publisher_site = "sprawdzam.afp.com"
+language_code = "pl"
+page_size = 50
+max_pages = 3
+
+[[source]]
+slug = "fc-konkret24"
+name = "Konkret24"
+publisher = "TVN24"
+kind = "fact_checker"
+domain = "konkret24.tvn24.pl"
+tier = 2
+license = "Metadane ClaimReview z Google Fact Check Tools API (warunki Google APIs); przechowywane: teza, ocena, link — bez treści artykułu."
+inclusion_rule = "Redakcja fact-checkingowa TVN24; członkostwo IFCN/EFCSN do potwierdzenia przy przeglądzie."
+homepage_url = "https://konkret24.tvn24.pl"
+[source.collect]
+collector = "google_fact_check"
+publisher_site = "konkret24.tvn24.pl"
+language_code = "pl"
+page_size = 50
+max_pages = 3
+
+[[source]]
+slug = "fc-fakenews-pl"
+name = "FakeNews.pl"
+publisher = "Fundacja Przeciwdziałania Dezinformacji"
+kind = "fact_checker"
+domain = "fakenews.pl"
+tier = 2
+license = "Metadane ClaimReview z Google Fact Check Tools API (warunki Google APIs); przechowywane: teza, ocena, link — bez treści artykułu."
+inclusion_rule = "Polska organizacja fact-checkingowa; członkostwo IFCN/EFCSN do potwierdzenia przy przeglądzie."
+homepage_url = "https://fakenews.pl"
+[source.collect]
+collector = "google_fact_check"
+publisher_site = "fakenews.pl"
+language_code = "pl"
+page_size = 50
+max_pages = 3
+
+[[source]]
+slug = "fc-pap-fakehunter"
+name = "PAP Fakehunter"
+publisher = "Polska Agencja Prasowa"
+kind = "fact_checker"
+domain = "fakehunter.pap.pl"
+tier = 2
+license = "Metadane ClaimReview z Google Fact Check Tools API (warunki Google APIs); przechowywane: teza, ocena, link — bez treści artykułu."
+inclusion_rule = "Serwis weryfikacji informacji PAP; obecność w indeksie Google Fact Check do potwierdzenia przy pierwszym pobraniu."
+homepage_url = "https://fakehunter.pap.pl"
+[source.collect]
+collector = "google_fact_check"
+publisher_site = "fakehunter.pap.pl"
+language_code = "pl"
+page_size = 50
+max_pages = 3
+
+# --------------------------------------------------------------------------- #
+# Verified-disinformation database (collector euvsdisinfo; needs
+# EUVSDISINFO_API_KEY; params: tools, page_size, max_records)
+# --------------------------------------------------------------------------- #
+
+[[source]]
+slug = "euvsdisinfo"
+name = "EUvsDisinfo"
+publisher = "East StratCom Task Force, Europejska Służba Działań Zewnętrznych (EEAS)"
+kind = "fact_checker"
+domain = "euvsdisinfo.eu"
+tier = 2
+license = "Baza EUvsDisinfo przez oficjalny serwer MCP; warunki ponownego wykorzystania do potwierdzenia; przechowywane: streszczenie przypadku, analiza, link."
+inclusion_rule = "Baza przypadków prokremlowskiej dezinformacji prowadzona przez instytucję UE; dotyczy FIMI (zakres zadania)."
+homepage_url = "https://euvsdisinfo.eu"
+lang = "en"
+[source.collect]
+collector = "euvsdisinfo"
+tools = ["cases", "articles"]
+page_size = 50
+max_records = 100
