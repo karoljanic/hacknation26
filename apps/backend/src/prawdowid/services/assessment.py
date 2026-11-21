@@ -82,6 +82,18 @@ years and periods in the evidence must match the claim's; a fact true for one
 year or period is not proof for another. Name concrete dates in the
 explanation when they matter (e.g. "według danych z 2023 r.").
 
+false versus misleading. Split the claim into its core assertion (what
+happened or exists) and its details (who did it, by whom, when, how much,
+why). false: the evidence contradicts the core assertion. misleading: the core
+assertion is true, but a detail is contradicted by the evidence or the
+wording suggests something the evidence contradicts (e.g. "the prosecutor is
+investigating the hackers who blocked the trains" when the prosecutor is
+investigating the blocking and says nothing about hackers). For misleading,
+start the explanation with "Częściowo." and say which part is true and which
+is not. A claim and its negation rest on the same facts and must never both
+be false: if the core assertion is true, the claim asserting it is confirmed
+or misleading, and the claim denying it is false.
+
 Absence is not refutation. That an evidence item does not mention something
 (a number, a name, an event) never makes a claim false or misleading: other
 documents may contain it. "refutes" requires a quote that states the contrary;
