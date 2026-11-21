@@ -1,0 +1,10 @@
+services:
+  web:
+    build:
+      secrets:
+        - source: npm_ca
+          target: npm_ca
+
+secrets:
+  npm_ca:
+    file: ${NODE_EXTRA_CA_CERTS:?Set NODE_EXTRA_CA_CERTS to a trusted CA file}

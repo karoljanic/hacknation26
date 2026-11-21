@@ -1,0 +1,72 @@
+name: prawdowid
+
+x-worker: &worker
+  build:
+    context: ../apps/backend
+  environment:
+    RABBITMQ_HOST: rabbitmq
+    RABBITMQ_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
+    RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:4-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: ../apps/backend
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+
+  web:
+    build:
+      context: ../apps/web
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+
+  worker-fetch:
+    <<: *worker
+    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "fetch", "--concurrency=1", "--hostname=fetch@%h"]
+
+  worker-claims:
+    <<: *worker
+    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "claims", "--concurrency=1", "--hostname=claims@%h"]
+
+  worker-search:
+    <<: *worker
+    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "search", "--concurrency=1", "--hostname=search@%h"]
+
+  worker-evidence:
+    <<: *worker
+    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "evidence", "--concurrency=1", "--hostname=evidence@%h"]
+
+  worker-aggregate:
+    <<: *worker
+    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "aggregate", "--concurrency=1", "--hostname=aggregate@%h"]
+
+  worker-ingestion:
+    <<: *worker
+    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "ingestion", "--concurrency=1", "--hostname=ingestion@%h"]
+
+volumes:
+  postgres_data:
