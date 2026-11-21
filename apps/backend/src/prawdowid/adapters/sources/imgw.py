@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
+import logging
 import os
 import ssl
 import time
@@ -27,6 +28,8 @@ from prawdowid.adapters.sources.gov_pl import (
     parse_gov_date,
     sort_latest,
 )
+
+logger = logging.getLogger(__name__)
 
 ImgwDataset = Literal["warningsmeteo", "warningshydro", "synop", "hydro"]
 
@@ -90,8 +93,12 @@ class ImgwDocument:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+class _RetryableStatus(RuntimeError):
+    pass
+
+
 class ImgwHttpFetcher:
-    """Lekki klient HTTP dla otwartego API danepubliczne.imgw.pl (bez klucza API)."""
+    """Lekki klient HTTP dla otwartego API danepubliczne.imgw.pl (weryfikuje host na każdym przekierowaniu)."""
 
     def __init__(
         self,
@@ -99,18 +106,19 @@ class ImgwHttpFetcher:
         timeout: float = 15.0,
         max_bytes: int = 8_000_000,
         max_retries: int = 2,
+        max_redirects: int = 3,
         user_agent: str = DEFAULT_USER_AGENT,
     ) -> None:
         self.max_bytes = max_bytes
         self.max_retries = max_retries
+        self.max_redirects = max_redirects
         verify: bool | ssl.SSLContext = True
         ca_bundle = os.environ.get("SSL_CERT_FILE")
         if ca_bundle:
             verify = ssl.create_default_context(cafile=ca_bundle)
         self._client = httpx.Client(
             timeout=httpx.Timeout(timeout),
-            follow_redirects=True,
-            max_redirects=3,
+            follow_redirects=False,
             verify=verify,
             headers={
                 "User-Agent": user_agent,
@@ -129,42 +137,56 @@ class ImgwHttpFetcher:
         self.close()
 
     def get(self, url: str) -> RawResource:
-        _ensure_imgw_url(url)
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                with self._client.stream("GET", url) as response:
-                    final_url = str(response.url)
-                    _ensure_imgw_url(final_url)
-                    if response.status_code in {429, 500, 502, 503, 504} and attempt < self.max_retries:
-                        time.sleep(0.5 * (2**attempt))
-                        continue
-                    if response.status_code != 200:
-                        raise RuntimeError(f"IMGW HTTP {response.status_code} dla {final_url}")
-
-                    buf = bytearray()
-                    for chunk in response.iter_bytes():
-                        buf.extend(chunk)
-                        if len(buf) > self.max_bytes:
-                            raise ValueError(
-                                f"Odpowiedź IMGW przekracza limit {self.max_bytes} B: {final_url}"
-                            )
-
-                    ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
-                    return RawResource(
-                        url=final_url,
-                        content=bytes(buf),
-                        content_type=ctype,
-                        fetched_at=datetime.now(timezone.utc),
-                        encoding=response.encoding or "utf-8",
-                    )
+                return self._get_with_redirects(url)
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_exc = exc
                 if attempt >= self.max_retries:
                     raise RuntimeError(f"Błąd sieci IMGW dla {url}: {exc}") from exc
                 time.sleep(0.5 * (2**attempt))
+            except _RetryableStatus as exc:
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    raise RuntimeError(str(exc)) from exc
+                time.sleep(0.5 * (2**attempt))
 
         raise RuntimeError(f"Nie udało się pobrać {url}: {last_exc}")
+
+    def _get_with_redirects(self, url: str) -> RawResource:
+        current = url
+        for hop in range(self.max_redirects + 1):
+            _ensure_imgw_url(current)
+            with self._client.stream("GET", current) as response:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("location")
+                    if not location or hop == self.max_redirects:
+                        raise RuntimeError(f"Przekroczono limit przekierowań IMGW dla {current}")
+                    current = str(response.url.join(location))
+                    continue
+                if response.status_code in {429, 500, 502, 503, 504}:
+                    raise _RetryableStatus(f"IMGW HTTP {response.status_code} dla {current}")
+                if response.status_code != 200:
+                    raise RuntimeError(f"IMGW HTTP {response.status_code} dla {current}")
+
+                buf = bytearray()
+                for chunk in response.iter_bytes():
+                    buf.extend(chunk)
+                    if len(buf) > self.max_bytes:
+                        raise ValueError(
+                            f"Odpowiedź IMGW przekracza limit {self.max_bytes} B: {current}"
+                        )
+
+                ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
+                return RawResource(
+                    url=str(response.url),
+                    content=bytes(buf),
+                    content_type=ctype,
+                    fetched_at=datetime.now(timezone.utc),
+                    encoding=response.encoding or "utf-8",
+                )
+        raise RuntimeError(f"Przekroczono limit przekierowań IMGW dla {url}")
 
 
 # --------------------------------------------------------------------------- #
@@ -604,14 +626,15 @@ class ImgwParser:
         hydro_limit: int | None = 10,
     ) -> list[ImgwDocument]:
         docs: list[ImgwDocument] = []
-        for fn in (
-            lambda: self.fetch_warnings_meteo(limit=warnings_limit),
-            lambda: self.fetch_warnings_hydro(limit=warnings_limit),
-            lambda: self.fetch_synop(limit=synop_limit),
-            lambda: self.fetch_hydro(limit=hydro_limit),
+        for name, fn in (
+            ("warningsmeteo", lambda: self.fetch_warnings_meteo(limit=warnings_limit)),
+            ("warningshydro", lambda: self.fetch_warnings_hydro(limit=warnings_limit)),
+            ("synop", lambda: self.fetch_synop(limit=synop_limit)),
+            ("hydro", lambda: self.fetch_hydro(limit=hydro_limit)),
         ):
             try:
                 docs.extend(fn())
-            except Exception:
+            except Exception as exc:
+                logger.warning("IMGW: błąd pobierania zbioru %s: %s", name, exc)
                 continue
         return docs

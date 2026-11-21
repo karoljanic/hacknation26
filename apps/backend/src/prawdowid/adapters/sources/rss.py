@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+import logging
 import os
 import re
 import socket
@@ -32,6 +33,8 @@ from prawdowid.adapters.sources.gov_pl import (
     sort_latest,
 )
 from prawdowid.adapters.sources.web import _is_public_address
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = "Prawdowid/0.1 (rss corpus ingestion)"
 _CHROME_TAGS = ("nav", "header", "footer", "aside", "form")
@@ -546,7 +549,8 @@ class RssParser:
                             docs = self._from_feed_resource(nested_res, limit=limit)
                             if docs:
                                 return docs
-            except Exception:
+            except Exception as exc:
+                logger.warning("RSS: nie udało się sprawdzić kandydata feedu %s: %s", candidate_feed, exc)
                 continue
 
         return self._from_html_listing(res, limit=limit, max_pages=max_pages)
@@ -559,6 +563,7 @@ class RssParser:
         items = sort_latest(parse_feed_xml(feed_res.content, base_url=feed_res.url))
         docs: list[RssDocument] = []
         seen_urls: set[str] = set()
+        seen_hashes: set[str] = set()
 
         for item in items:
             canonical = _canonical_url(item.url)
@@ -588,12 +593,17 @@ class RssParser:
                         title = art_title
                     if published_at is None and art_pub is not None:
                         published_at = art_pub
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("RSS: nie udało się dociągnąć artykułu %s: %s", item.url, exc)
 
             combined = normalize_text(f"{title}\n\n{text}" if text else title)
             if len(combined) < self.min_text_length:
                 continue
+
+            doc_hash = content_hash(combined)
+            if doc_hash in seen_hashes:
+                continue
+            seen_hashes.add(doc_hash)
 
             docs.append(
                 RssDocument(
@@ -601,7 +611,7 @@ class RssParser:
                     domain=_domain(final_url),
                     title=title,
                     text=combined,
-                    content_hash=content_hash(combined),
+                    content_hash=doc_hash,
                     fetched_at=fetched_at,
                     published_at=published_at,
                     source_feed_url=feed_res.url,
@@ -621,6 +631,7 @@ class RssParser:
     ) -> list[RssDocument]:
         docs: list[RssDocument] = []
         seen_articles: set[str] = set()
+        seen_hashes: set[str] = set()
         seen_pages: set[str] = set()
         current_res: RawResource | None = first_res
 
@@ -653,13 +664,17 @@ class RssParser:
                     )
                     if len(text) < self.min_text_length:
                         continue
+                    doc_hash = content_hash(text)
+                    if doc_hash in seen_hashes:
+                        continue
+                    seen_hashes.add(doc_hash)
                     docs.append(
                         RssDocument(
                             url=art.url,
                             domain=_domain(art.url),
                             title=title or art.url,
                             text=text,
-                            content_hash=content_hash(text),
+                            content_hash=doc_hash,
                             fetched_at=art.fetched_at,
                             published_at=published_at,
                             source_feed_url=first_res.url,
@@ -667,7 +682,8 @@ class RssParser:
                     )
                     if len(docs) >= limit:
                         break
-                except Exception:
+                except Exception as exc:
+                    logger.warning("RSS(HTML): pominięto artykuł %s: %s", article_url, exc)
                     continue
 
             if len(docs) >= limit:
@@ -682,7 +698,8 @@ class RssParser:
                 break
             try:
                 current_res = self.fetcher.get(next_url)
-            except Exception:
+            except Exception as exc:
+                logger.warning("RSS(HTML): błąd pobierania strony paginacji %s: %s", next_url, exc)
                 break
 
         return sort_latest(docs, limit=limit)

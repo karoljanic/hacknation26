@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import io
+import logging
 import os
 import re
 import ssl
@@ -28,6 +29,8 @@ try:
     from pypdf import PdfReader
 except ImportError:  # pragma: no cover - opcjonalna zależność do PDF
     PdfReader = None  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
 
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
 ALLOWED_HOSTS = frozenset({"gov.pl", "www.gov.pl"})
@@ -110,8 +113,12 @@ class GovPlDocument:
     errors: tuple[str, ...] = field(default_factory=tuple)
 
 
+class _RetryableStatus(RuntimeError):
+    pass
+
+
 class GovPlHttpFetcher:
-    """Lekki klient HTTP dla gov.pl (obsługuje gzip, PDF, retry i SSL_CERT_FILE)."""
+    """Lekki klient HTTP dla gov.pl (weryfikuje host przed każdym przekierowaniem, obsługuje gzip, PDF i SSL_CERT_FILE)."""
 
     def __init__(
         self,
@@ -119,18 +126,19 @@ class GovPlHttpFetcher:
         timeout: float = 15.0,
         max_bytes: int = 8_000_000,
         max_retries: int = 2,
+        max_redirects: int = 4,
         user_agent: str = DEFAULT_USER_AGENT,
     ) -> None:
         self.max_bytes = max_bytes
         self.max_retries = max_retries
+        self.max_redirects = max_redirects
         verify: bool | ssl.SSLContext = True
         ca_bundle = os.environ.get("SSL_CERT_FILE")
         if ca_bundle:
             verify = ssl.create_default_context(cafile=ca_bundle)
         self._client = httpx.Client(
             timeout=httpx.Timeout(timeout),
-            follow_redirects=True,
-            max_redirects=4,
+            follow_redirects=False,
             verify=verify,
             headers={
                 "User-Agent": user_agent,
@@ -149,42 +157,54 @@ class GovPlHttpFetcher:
         self.close()
 
     def get(self, url: str) -> RawResource:
-        _ensure_gov_pl_url(url)
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                with self._client.stream("GET", url) as response:
-                    final_url = str(response.url)
-                    _ensure_gov_pl_url(final_url)
-                    if response.status_code in {429, 500, 502, 503, 504} and attempt < self.max_retries:
-                        time.sleep(0.5 * (2**attempt))
-                        continue
-                    if response.status_code != 200:
-                        raise RuntimeError(f"gov.pl HTTP {response.status_code} dla {final_url}")
-
-                    buf = bytearray()
-                    for chunk in response.iter_bytes():
-                        buf.extend(chunk)
-                        if len(buf) > self.max_bytes:
-                            raise ValueError(
-                                f"Zasób przekracza limit {self.max_bytes} B: {final_url}"
-                            )
-
-                    ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
-                    return RawResource(
-                        url=final_url,
-                        content=bytes(buf),
-                        content_type=ctype,
-                        fetched_at=datetime.now(timezone.utc),
-                        encoding=response.encoding,
-                    )
+                return self._get_with_redirects(url)
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 last_exc = exc
                 if attempt >= self.max_retries:
                     raise RuntimeError(f"Błąd sieci przy pobieraniu {url}: {exc}") from exc
                 time.sleep(0.5 * (2**attempt))
+            except _RetryableStatus as exc:
+                last_exc = exc
+                if attempt >= self.max_retries:
+                    raise RuntimeError(str(exc)) from exc
+                time.sleep(0.5 * (2**attempt))
 
         raise RuntimeError(f"Nie udało się pobrać {url}: {last_exc}")
+
+    def _get_with_redirects(self, url: str) -> RawResource:
+        current = url
+        for hop in range(self.max_redirects + 1):
+            _ensure_gov_pl_url(current)
+            with self._client.stream("GET", current) as response:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("location")
+                    if not location or hop == self.max_redirects:
+                        raise RuntimeError(f"Przekroczono limit przekierowań dla {current}")
+                    current = str(response.url.join(location))
+                    continue
+                if response.status_code in {429, 500, 502, 503, 504}:
+                    raise _RetryableStatus(f"gov.pl HTTP {response.status_code} dla {current}")
+                if response.status_code != 200:
+                    raise RuntimeError(f"gov.pl HTTP {response.status_code} dla {current}")
+
+                buf = bytearray()
+                for chunk in response.iter_bytes():
+                    buf.extend(chunk)
+                    if len(buf) > self.max_bytes:
+                        raise ValueError(f"Zasób przekracza limit {self.max_bytes} B: {current}")
+
+                ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
+                return RawResource(
+                    url=str(response.url),
+                    content=bytes(buf),
+                    content_type=ctype,
+                    fetched_at=datetime.now(timezone.utc),
+                    encoding=response.encoding,
+                )
+        raise RuntimeError(f"Przekroczono limit przekierowań dla {url}")
 
 
 # --------------------------------------------------------------------------- #
@@ -646,6 +666,7 @@ class GovPlParser:
 
         docs: list[GovPlDocument] = []
         seen_articles: set[str] = set()
+        seen_hashes: set[str] = set()
         seen_pages: set[str] = set()
         current_url: str | None = listing_url
         first_resource: RawResource | None = None
@@ -660,9 +681,10 @@ class GovPlParser:
 
             try:
                 resource = self.fetcher.get(current_url)
-            except Exception:
+            except Exception as exc:
                 if page_idx == 0:
                     raise
+                logger.warning("gov.pl: błąd pobierania strony paginacji %s: %s", current_url, exc)
                 break
 
             if first_resource is None:
@@ -684,11 +706,13 @@ class GovPlParser:
                     time.sleep(self.request_delay)
                 try:
                     doc = self.fetch_page(article_url)
-                    if doc is not None:
+                    if doc is not None and doc.content_hash not in seen_hashes:
+                        seen_hashes.add(doc.content_hash)
                         docs.append(doc)
                         if len(docs) >= limit:
                             break
-                except Exception:
+                except Exception as exc:
+                    logger.warning("gov.pl: pominięto artykuł %s: %s", article_url, exc)
                     continue
 
             if len(docs) >= limit:
@@ -744,6 +768,7 @@ class GovPlParser:
                     if pdf_text:
                         combined_sections.append(f"[Załącznik: {att_title}]\n{pdf_text}")
                 except Exception as exc:
+                    logger.warning("gov.pl: błąd załącznika %s: %s", att_url, exc)
                     errors.append(f"Załącznik {att_url}: {exc}")
 
         full_text = normalize_text("\n\n".join(combined_sections))
