@@ -70,6 +70,9 @@ services:
   web:
     build:
       context: ../apps/web
+    environment:
+      # Used server-side by the web app's /api/status route.
+      API_URL: http://api:8000
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
 
