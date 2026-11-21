@@ -6,10 +6,11 @@ Celery, RabbitMQ i PostgreSQL.
 ## Status
 
 To fundament architektury, a nie działający fact-checker. Dostępne są adaptery
-AI i przykłady ich użycia, ale aplikacja nie przyjmuje jeszcze zgłoszeń, nie
-wywołuje automatycznie modeli, nie korzysta z bazy, nie indeksuje źródeł i nie
-przetwarza zadań. Endpoint `/health` potwierdza tylko działanie procesu API,
-nie dostępność zależności.
+AI, schemat bazy (PostgreSQL + pgvector) i przyjmowanie zgłoszeń z CLI:
+tekst/URL/media → maskowanie danych osobowych → ekstrakcja tez → zapis tez
+z deduplikacją. Nie ma jeszcze API zgłoszeń, korpusu źródeł, wyszukiwania
+dowodów ani werdyktów. Endpoint `/health` potwierdza tylko działanie procesu
+API; `/health/ready` sprawdza połączenie z bazą i migracje.
 
 ## Uruchomienie lokalne
 
@@ -41,6 +42,58 @@ docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.ca.yaml 
 
 Certyfikat nie jest zapisywany w obrazie. Plik override jest potrzebny tylko
 w środowiskach wymagających dodatkowego CA.
+
+## Baza danych
+
+PostgreSQL 17 z rozszerzeniem pgvector (`pgvector/pgvector:0.8.1-pg17`).
+Schemat: `apps/backend/src/prawdowid/persistence/models.py`, migracje Alembic
+w `persistence/migrations`. W Compose usługa `migrate` wykonuje
+`alembic upgrade head` przed startem API i workerów.
+
+Graf dowodowy jest zapisany relacyjnie: węzły to tabele (`source`,
+`document`, `passage`, `claim`, `submission`, …), a krawędzie to tabele
+z atrybutami: `evidence` (fragment → teza: supports/refutes/adds_context, cytat),
+`claim_relation` (teza → teza: same_as/contradicts/supersedes/…),
+`document_relation` i `submission_claim` (zgłoszenie → teza: states/implies/asks).
+Werdykt (`assessment`) jest oddzielony od statusu przetwarzania
+(`verification_run.status`: ok/tech_failure/needs_clarification/out_of_scope).
+
+Do pracy lokalnej z backendem poza kontenerem `deploy/compose.dev.yaml`
+publikuje porty bazy i RabbitMQ na localhost:
+
+```bash
+docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.dev.yaml up -d postgres rabbitmq
+export DATABASE_URL=postgresql+psycopg://prawdowid:change-me-local@127.0.0.1:5432/prawdowid
+cd apps/backend && alembic upgrade head
+```
+
+### Zapis zgłoszeń i tez
+
+`ClaimIntake` (`services/intake.py`) łączy przygotowanie wejścia i
+`ClaimExtractor` z bazą:
+
+1. tworzy `submission` (z datą wygaśnięcia, domyślnie 30 dni) i
+   `verification_run`;
+2. maskuje oczywiste dane osobowe (e-mail, telefon, PESEL, nr konta/karty)
+   **przed** wysłaniem tekstu do modelu; dla URL zapisuje tylko link, nie treść
+   artykułu;
+3. wyodrębnia tezy, a każdą sprawdza z bazą: najpierw dokładne dopasowanie
+   (po normalizacji wielkości liter, spacji i końcowej interpunkcji), potem
+   podobieństwo wektorowe (odległość kosinusowa ≤ 0,12, ten sam rodzaj tezy
+   i model embeddingu; próg wymaga kalibracji). Dopasowana teza jest
+   podłączana do zgłoszenia zamiast tworzenia duplikatu; sposób dopasowania
+   zapisuje się w `submission_claim.match`;
+4. zapisuje status, czas i użyte modele/tokeny w `verification_run`. Błąd
+   dostawcy, limit lub brak klucza daje status `tech_failure`, a brak tez lub
+   nieczytelne wejście — `needs_clarification`; żaden z nich nie jest werdyktem.
+
+```bash
+python examples/extract_claims.py --store --text "Rząd podniósł VAT do 25%."
+python examples/extract_claims.py --store --url "https://example.org/artykul" --channel web
+```
+
+Testy `tests/test_intake.py` używają atrap modelu i embeddingu, ale
+prawdziwej bazy z `DATABASE_URL`; bez dostępnej bazy są pomijane.
 
 ## Struktura
 
