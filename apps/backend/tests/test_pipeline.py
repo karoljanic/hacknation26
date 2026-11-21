@@ -305,3 +305,105 @@ def test_assessment_failure_marks_the_run_tech_failure() -> None:
 
     assert result.status == RunStatus.TECH_FAILURE
     assert run.status == RunStatus.TECH_FAILURE
+
+
+def _assessed_with_injection_note(claim_id: uuid.UUID, item: EvidenceItem):
+    from prawdowid.ai.adapters.llm import StructuredResult
+
+    data = SubmissionAssessmentOutput(
+        assessments=[
+            ClaimAssessmentOutput(
+                claim_id=str(claim_id), verdict="false", strength="strong",
+                reasons=AssessmentReasons(source_tiers=[2], independent_sources=1, conflicting_sources=False),
+                explanation="Demagog ocenił tezę jako fałsz.",
+                citations=[{"evidence_index": 0, "quote": item.snippet, "relation": "refutes"}],
+            )
+        ],
+        injection_notes=[{"claim_id": str(claim_id), "evidence_index": 0, "excerpt": "Demagog ocenił"}],
+    )
+    return StructuredResult(data=data, requested_model="gemini-test", model_version="v1",
+                            input_tokens=1000, output_tokens=100)
+
+
+def test_run_is_closed_once_after_the_verdicts_with_full_telemetry(monkeypatch) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from prawdowid.services.usage import UsageMeter, usage_entry
+
+    monkeypatch.setenv("MODEL_PRICES_USD_PER_MTOK", '{"gemini-test": [1, 10], "jev": [0, 0]}')
+    run_id, claim_id = uuid.uuid4(), uuid.uuid4()
+    intake = Mock()
+    intake.submit_text.return_value = intake_result(RunStatus.OK, [stored(claim_id, "Teza.")], run_id=run_id)
+    item = evidence_item()
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(
+        return_value=EvidenceSearchResult(claims=[ClaimEvidence(claim_id=str(claim_id), items=[item])], skipped_opinion_ids=[])
+    )
+    meter = UsageMeter()
+    sublinks = Mock()
+
+    def select(text, items):
+        meter.record(usage_entry("decision", "jev", None, 50, 5))
+        return [EvidenceForAssessment(item=item, text=item.snippet, fully_fetched=False)]
+
+    sublinks.select.side_effect = select
+    assessment = Mock()
+    assessment.assess.return_value = _assessed_with_injection_note(claim_id, item)
+    # As left by intake with keep_run_open: still running, extraction usage recorded.
+    run = VerificationRun(
+        id=run_id, status=RunStatus.RUNNING, pipeline_version="t",
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=2),
+        models=[usage_entry("extraction", "gemini-test", "v1", 1000, 0)], injection_flags=[],
+    )
+    pipeline = make_pipeline(run=run, intake=intake, evidence_search=evidence_search, sublinks=sublinks,
+                             assessment=assessment)
+    pipeline.usage_meter = meter
+
+    result = asyncio.run(pipeline.run_text("Teza.", channel=Channel.WEB))
+
+    assert result.status == RunStatus.OK
+    assert run.status == RunStatus.OK and run.finished_at is not None
+    assert run.latency_ms >= 2000  # end-to-end, not just intake
+    assert [m["role"] for m in run.models] == ["extraction", "decision", "assessment"]
+    # (1000 + 1000) input * $1/M + 100 output * $10/M
+    assert str(run.est_cost_usd) == "0.003000"
+    assert run.injection_flags == [{
+        "where": str(item.url), "claim_id": str(claim_id), "excerpt": "Demagog ocenił",
+        "detected_by": "assessment_model",
+    }]
+
+
+def test_unexpected_failure_still_closes_the_run() -> None:
+    run_id, claim_id = uuid.uuid4(), uuid.uuid4()
+    intake = Mock()
+    intake.submit_text.return_value = intake_result(RunStatus.OK, [stored(claim_id, "Teza.")], run_id=run_id)
+    item = evidence_item()
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(
+        return_value=EvidenceSearchResult(claims=[ClaimEvidence(claim_id=str(claim_id), items=[item])], skipped_opinion_ids=[])
+    )
+    sublinks = Mock()
+    sublinks.select.side_effect = KeyError("bug")
+    run = VerificationRun(id=run_id, status=RunStatus.RUNNING, pipeline_version="t")
+    pipeline = make_pipeline(run=run, intake=intake, evidence_search=evidence_search, sublinks=sublinks)
+
+    result = asyncio.run(pipeline.run_text("Teza.", channel=Channel.WEB))
+
+    assert result.status == RunStatus.TECH_FAILURE
+    assert run.status == RunStatus.TECH_FAILURE and run.finished_at is not None
+
+
+def test_cancellation_closes_the_run_and_propagates() -> None:
+    run_id, claim_id = uuid.uuid4(), uuid.uuid4()
+    intake = Mock()
+    intake.submit_text.return_value = intake_result(RunStatus.OK, [stored(claim_id, "Teza.")], run_id=run_id)
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(side_effect=asyncio.CancelledError())
+    run = VerificationRun(id=run_id, status=RunStatus.RUNNING, pipeline_version="t")
+    pipeline = make_pipeline(run=run, intake=intake, evidence_search=evidence_search)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(pipeline.run_text("Teza.", channel=Channel.WEB))
+
+    assert run.status == RunStatus.TECH_FAILURE and run.finished_at is not None
+    assert "anulowane" in run.error

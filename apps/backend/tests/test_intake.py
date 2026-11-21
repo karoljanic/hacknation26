@@ -203,3 +203,31 @@ def test_embedding_failure_does_not_fail_the_submission(cleanup: list[uuid.UUID]
     with session_factory()() as session:
         models = session.get_one(VerificationRun, result.run_id).models
         assert {"role": "embedding", "error": "RuntimeError", "fallback": "exact_text"} in models
+
+
+def test_deferred_preparation_failure_is_recorded_on_the_run(cleanup: list[uuid.UUID]) -> None:
+    def prepare():
+        raise RuntimeError("media reader timed out")
+
+    result = make_intake(FakeLLM([])).submit_deferred(prepare, channel=Channel.WEB, url="https://example.org/a")
+    cleanup.append(result.submission_id)
+
+    assert result.status is RunStatus.TECH_FAILURE
+    with session_factory()() as session:
+        run = session.get_one(VerificationRun, result.run_id)
+        assert run.status is RunStatus.TECH_FAILURE and "timed out" in (run.error or "")
+        assert session.get_one(Submission, result.submission_id).url == "https://example.org/a"
+
+
+def test_intake_can_leave_the_run_open_for_later_stages(cleanup: list[uuid.UUID]) -> None:
+    intake = make_intake(FakeLLM([(f"{uuid.uuid4().hex[:8]} Teza.", "factual_claim")]))
+    intake.keep_run_open = True
+
+    result = intake.submit_text("Teza.", channel=Channel.WEB)
+    cleanup.append(result.submission_id)
+
+    assert result.status is RunStatus.OK
+    with session_factory()() as session:
+        run = session.get_one(VerificationRun, result.run_id)
+        assert run.status is RunStatus.RUNNING and run.finished_at is None
+        assert run.models[0]["role"] == "extraction"  # usage is already recorded

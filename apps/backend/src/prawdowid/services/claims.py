@@ -31,6 +31,8 @@ For each factual_claim and verification_question also give:
   anything about current or recent events, people's statements, policies,
   prices, current statistics, rankings or anything that can change.
 Leave these empty or false for opinions.
+For every item also give text_en: a faithful English translation of its text
+(same meaning, names, numbers and negations), used only to search English sources.
 """
 
 

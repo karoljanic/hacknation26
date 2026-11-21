@@ -68,10 +68,44 @@ def test_search_queries_add_short_keyword_variants_without_question_words() -> N
     queries = search_queries("Czy Wrocław był jedynym miastem w Polsce, w którym 65-latkowie jeździli za darmo?")
 
     assert queries[0].startswith("Czy Wrocław był")
-    assert "Wrocław jedynym" in queries
-    assert "Wrocław jedynym miastem Polsce 65-latkowie" in queries
+    # Names and number-bearing words are picked first, in their original order.
+    assert queries[1] == "Wrocław 65-latkowie"
+    assert "Wrocław jedynym miastem" in queries  # leading keywords
     assert all("Czy" not in query for query in queries[1:])
     assert len(set(queries)) == len(queries)
+
+
+def test_search_queries_use_the_users_original_wording_too() -> None:
+    queries = search_queries(
+        "Wrocław był jedynym miastem w Polsce, gdzie osoby w wieku 65 lat jeździły za darmo.",
+        source_quotes=["Czy Wrocław był jedynym miastem, w którym 65-latkowie jeździli za darmo?"],
+    )
+
+    assert queries[1].startswith("Czy Wrocław był jedynym miastem, w którym 65-latkowie")
+    assert "Wrocław 65-latkowie" in queries
+    assert len(queries) <= 10
+
+
+def test_bare_numbers_rank_below_topic_words() -> None:
+    queries = search_queries("Wrocław wydaje na komunikację około 700 mln zł.")
+
+    assert queries[1] == "Wrocław komunikację"
+
+
+def test_google_is_queried_with_the_claims_source_quotes() -> None:
+    google = Mock(spec=FactCheckSource)
+    google.search_text.return_value = google_page([])
+    euvsdisinfo = Mock()
+    euvsdisinfo.search = AsyncMock(return_value=euvsdisinfo_result([]))
+    rewritten = ClaimForVerification(
+        id="c1", text="Osoby w wieku 65 lat jeżdżą za darmo.", kind="factual_claim",
+        source_quotes=["65-latkowie we Wrocławiu jeżdżą za darmo"],
+    )
+
+    asyncio.run(EvidenceSearchOrchestrator(google=google, euvsdisinfo=euvsdisinfo).search([rewritten]))
+
+    sent = [call.args[0].query for call in google.search_text.call_args_list]
+    assert "65-latkowie we Wrocławiu jeżdżą za darmo" in sent
 
 
 def test_google_variants_are_merged_by_url_and_survive_partial_failure() -> None:
@@ -322,3 +356,104 @@ def test_wikipedia_articles_become_citable_tier3_items_and_outages_are_reported(
 
     wikipedia.search.side_effect = httpx.ConnectError("down")
     assert asyncio.run(orchestrator.search([target])).claims[0].unavailable_sources == ["wikipedia"]
+
+
+def test_unconfigured_providers_are_reported_as_unavailable() -> None:
+    euvsdisinfo = Mock()
+    euvsdisinfo.search = AsyncMock(
+        return_value=euvsdisinfo_result([{"type": "case", "title": "Case", "content": "Opis.", "link": "https://euvsdisinfo.eu/x"}])
+    )
+
+    result = asyncio.run(
+        EvidenceSearchOrchestrator(google=None, euvsdisinfo=euvsdisinfo).search([claim("c1", "Rząd podniósł VAT.")])
+    )
+
+    assert result.claims[0].unavailable_sources == ["google_fact_check"]
+    assert [item.source for item in result.claims[0].items] == ["euvsdisinfo"]
+
+    result = asyncio.run(
+        EvidenceSearchOrchestrator(google=None, euvsdisinfo=None).search([claim("c1", "Rząd podniósł VAT.")])
+    )
+    assert result.claims[0].unavailable_sources == ["google_fact_check", "euvsdisinfo"]
+
+
+def test_euvsdisinfo_is_queried_in_english_when_a_translation_exists() -> None:
+    google = Mock(spec=FactCheckSource)
+    google.search_text.return_value = google_page([])
+    euvsdisinfo = Mock()
+    euvsdisinfo.search = AsyncMock(return_value=euvsdisinfo_result([]))
+    claims = [
+        ClaimForVerification(id="c1", text="Ukraina wystrzeliła rakietę w stronę Polski.", kind="factual_claim",
+                             text_en="Ukraine fired a missile at Poland."),
+        claim("c2", "Rząd podniósł VAT."),  # no translation: falls back to the original
+    ]
+
+    asyncio.run(EvidenceSearchOrchestrator(google=google, euvsdisinfo=euvsdisinfo).search(claims))
+
+    queries = {call.args[0].query for call in euvsdisinfo.search.call_args_list}
+    assert queries == {"Ukraine fired a missile at Poland.", "Rząd podniósł VAT."}
+    # Google Fact Check (Polish fact-checkers) still gets the Polish text.
+    assert "Ukraine fired a missile at Poland." not in {c.args[0].query for c in google.search_text.call_args_list}
+
+
+def test_euvsdisinfo_transport_failure_does_not_cancel_the_rest_of_the_search() -> None:
+    """Like the MCP client: requests run in a background task of a task group
+    whose scope wraps the connection; a transport error there cancels the
+    body and surfaces as an ExceptionGroup on exit (Test 3, DNS failure)."""
+    from contextlib import asynccontextmanager
+
+    import anyio
+    import httpx
+
+    @asynccontextmanager
+    async def failing_connection():
+        failed = anyio.Event()
+
+        class Adapter:
+            async def search(self, request):
+                failed.set()
+                await anyio.sleep(10)  # cancelled when the background task fails
+
+        async def transport() -> None:
+            await failed.wait()
+            raise httpx.ConnectError("[Errno -5] No address associated with hostname")
+
+        async with anyio.create_task_group() as group:
+            group.start_soon(transport)
+            yield Adapter()
+
+    google = Mock(spec=FactCheckSource)
+    google.search_text.return_value = google_page([("https://demagog.org.pl/a", "Analiza A")])
+    claims = [claim("c1", "Rząd podniósł VAT."), claim("c2", "Inflacja spadła.")]
+
+    result = asyncio.run(
+        EvidenceSearchOrchestrator(google=google, euvsdisinfo_connect=failing_connection).search(claims)
+    )
+
+    for claim_evidence in result.claims:
+        assert claim_evidence.unavailable_sources == ["euvsdisinfo"]
+        assert [str(item.url) for item in claim_evidence.items] == ["https://demagog.org.pl/a"]
+
+
+def test_euvsdisinfo_connection_is_opened_once_per_search() -> None:
+    from contextlib import asynccontextmanager
+
+    opened = []
+    adapter = Mock()
+    adapter.search = AsyncMock(return_value=euvsdisinfo_result(
+        [{"type": "case", "title": "Case", "content": "Opis.", "link": "https://euvsdisinfo.eu/x"}]
+    ))
+
+    @asynccontextmanager
+    async def connect():
+        opened.append(1)
+        yield adapter
+
+    google = Mock(spec=FactCheckSource)
+    google.search_text.return_value = google_page([])
+    claims = [claim("c1", "Rząd podniósł VAT."), claim("c2", "Inflacja spadła.")]
+
+    result = asyncio.run(EvidenceSearchOrchestrator(google=google, euvsdisinfo_connect=connect).search(claims))
+
+    assert opened == [1]
+    assert [[i.source for i in c.items] for c in result.claims] == [["euvsdisinfo"], ["euvsdisinfo"]]

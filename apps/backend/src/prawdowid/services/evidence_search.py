@@ -12,7 +12,8 @@ technical limitation later, never silently turned into "no evidence found".
 import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
@@ -33,7 +34,8 @@ from prawdowid.services.gov_connectors import GovConnectorFetcher, GovConnectorS
 
 MAX_CLAIMS_PER_SEARCH = 10
 MIN_KEYWORDS, MAX_KEYWORDS = 2, 6
-MAX_GOOGLE_QUERIES = 8
+MAX_GOOGLE_QUERIES = 10  # Google Fact Check calls per claim
+MAX_FULL_TEXT_QUERY = 300  # longer quotes are only searched by keywords
 GOV_SEARCH_HITS_PER_QUERY = 10
 GOV_SEARCH_MAX_ITEMS = 5
 # gov.pl search ORs the query words, so "strajk generalny Włochy" also returns
@@ -85,28 +87,73 @@ def _keywords(text: str) -> list[str]:
     return [
         word
         for word in _WORD.findall(text)
-        if word.casefold() not in _STOPWORDS and (len(word) > 3 or word.isdigit())
+        if word.casefold() not in _STOPWORDS and (len(word) > 3 or any(ch.isdigit() for ch in word))
     ]
 
 
-def search_queries(text: str, hints: Sequence[str] = ()) -> list[str]:
-    """Full text, model-written keyword queries, then short keyword variants.
+def _salience(word: str) -> float:
+    """Names ("Wrocław") and number-bearing words ("65-latkowie") identify a
+    topic far better than common words; bare numbers are weak on their own
+    (fact-checks often round or restate them)."""
+    has_digit = any(ch.isdigit() for ch in word)
+    has_alpha = any(ch.isalpha() for ch in word)
+    score = min(len(word), 12) / 12
+    if word[:1].isupper():
+        score += 3
+    if has_digit and has_alpha:
+        score += 3
+    elif has_digit:
+        score += 0.5
+    return score
+
+
+def _keyword_variants(text: str) -> list[str]:
+    words = _keywords(text)
+    ranked = sorted(range(len(words)), key=lambda i: (-_salience(words[i]), i))
+    variants: list[str] = []
+    # Most salient words, kept in their original order (Google is word-order sensitive).
+    for count in range(MIN_KEYWORDS, MIN_KEYWORDS + 3):
+        variants.append(" ".join(words[i] for i in sorted(ranked[:count])))
+    # Leading keywords: the subject and verb usually come first in Polish claims.
+    for count in (MIN_KEYWORDS + 1, MAX_KEYWORDS):
+        variants.append(" ".join(words[:count]))
+    return variants
+
+
+def search_queries(
+    text: str,
+    hints: Sequence[str] = (),
+    source_quotes: Sequence[str] = (),
+    *,
+    max_queries: int = MAX_GOOGLE_QUERIES,
+) -> list[str]:
+    """Full text, model-written keyword queries, then keyword variants of the
+    claim and of the user's original wording.
 
     Google Fact Check matches rigidly: a full sentence often returns nothing,
-    while the same article is found by 2-6 of its topic words, and only when
-    they match the article's wording (``hints`` from claim extraction add
-    synonyms). Which query hits varies per claim, so several are tried.
+    while the same article is found by 2-4 of its topic words, and only when
+    they match the article's wording. ``hints`` (from claim extraction) add
+    synonyms; the extractor also rewords claims, so the user's verbatim
+    ``source_quotes`` are searched too. Which query hits varies per claim, so
+    several are tried and their results merged by URL.
     """
-    queries = [text]
-    for hint in hints:
-        if hint not in queries:
-            queries.append(hint)
-    words = _keywords(text)
-    for count in range(MIN_KEYWORDS, MAX_KEYWORDS + 1):
-        query = " ".join(words[:count])
-        if query and query not in queries:
+    bases = [text, *(quote for quote in source_quotes if quote.strip() and quote.strip() != text.strip())]
+    candidates: list[str] = []
+    for base in bases[:1]:
+        candidates.append(base.strip())
+    candidates.extend(hints)
+    for base in bases[1:]:
+        if len(base) <= MAX_FULL_TEXT_QUERY:
+            candidates.append(base.strip())
+    # Interleave so the cap still keeps the best variants of every base text.
+    per_base = [_keyword_variants(base) for base in bases]
+    for rank in range(max((len(v) for v in per_base), default=0)):
+        candidates.extend(variants[rank] for variants in per_base if rank < len(variants))
+    queries: list[str] = []
+    for query in candidates:
+        if query and query.casefold() not in {q.casefold() for q in queries}:
             queries.append(query)
-    return queries[:MAX_GOOGLE_QUERIES]
+    return queries[:max_queries]
 
 
 def _terms(text: str) -> set[str]:
@@ -144,6 +191,7 @@ def _gov_search_item(hit: GovSearchHit) -> EvidenceItem:
         catalog_slug=GOV_SEARCH_SLUG,
         snippet=hit.intro or hit.title,
         published_at=hit.published_at,
+        lang="pl",
     )
 
 
@@ -156,7 +204,7 @@ def odyseusz_items(advisory: CountryAdvisory) -> list[EvidenceItem]:
                 source="odyseusz", kind="official",
                 title=f"Komunikat MSZ dla podróżujących – {advisory.name}",
                 url=advisory.page_url, publisher=ODYSEUSZ_PUBLISHER, catalog_slug=ODYSEUSZ_SLUG,
-                snippet=advisory.notice, published_at=published,
+                snippet=advisory.notice, published_at=published, lang="pl",
             )
         )
     profile = "\n".join(
@@ -169,7 +217,7 @@ def odyseusz_items(advisory: CountryAdvisory) -> list[EvidenceItem]:
                 source="odyseusz", kind="official",
                 title=f"Profil kraju MSZ – {advisory.name}: ostrzeżenia i najważniejsze informacje",
                 url=f"{advisory.page_url}#profil", publisher=ODYSEUSZ_PUBLISHER, catalog_slug=ODYSEUSZ_SLUG,
-                snippet=profile, published_at=published,
+                snippet=profile, published_at=published, lang="pl",
             )
         )
     return items
@@ -191,6 +239,9 @@ def _google_items(query: str, source: FactCheckSource, *, language_code: str, pa
                     rating=review.textual_rating,
                     snippet=claim.text,
                     published_at=review.reviewed_at or claim.claimed_at,
+                    # The review's language as reported by Google; queries are
+                    # restricted to ``language_code`` anyway.
+                    lang=(review.language_code or language_code)[:8] or None,
                 )
             )
     return items
@@ -225,17 +276,49 @@ async def _euvsdisinfo_items(query: str, adapter: EUvsDisinfoAdapter) -> list[Ev
                 rating="Narracja uznana przez EUvsDisinfo za dezinformację" if kind == "claim_review" else None,
                 snippet=hit.content[:800],
                 published_at=None,  # the search tool does not document a date field
+                lang="en",  # the registry's case descriptions and articles are in English
             )
         )
     return items
+
+
+class ProviderNotConfigured(RuntimeError):
+    pass
+
+
+async def _unconfigured(source: str) -> list[EvidenceItem]:
+    raise ProviderNotConfigured(f"{source} is not configured")
+
+
+def _contains_external_cancellation(group: BaseExceptionGroup) -> bool:
+    """A group holding only a CancelledError means the check itself was
+    cancelled (e.g. the client went away): that must propagate."""
+    return all(isinstance(error, asyncio.CancelledError) for error in group.exceptions)
+
+
+def _with_euvsdisinfo(
+    claim_evidence: ClaimEvidence, result: list[EvidenceItem] | BaseException
+) -> ClaimEvidence:
+    if isinstance(result, BaseException):
+        return claim_evidence.model_copy(
+            update={"unavailable_sources": [*claim_evidence.unavailable_sources, "euvsdisinfo"]}
+        )
+    # Evidence order: Google, EUvsDisinfo, then the other providers.
+    google = [item for item in claim_evidence.items if item.source == "google_fact_check"]
+    rest = [item for item in claim_evidence.items if item.source != "google_fact_check"]
+    return claim_evidence.model_copy(update={"items": [*google, *result, *rest]})
+
+
+EUvsDisinfoConnect = Callable[[], AbstractAsyncContextManager[EUvsDisinfoAdapter]]
 
 
 class EvidenceSearchOrchestrator:
     def __init__(
         self,
         *,
-        google: FactCheckSource,
-        euvsdisinfo: EUvsDisinfoAdapter,
+        google: FactCheckSource | None,
+        euvsdisinfo: EUvsDisinfoAdapter | None = None,
+        euvsdisinfo_connect: EUvsDisinfoConnect | None = None,
         gov_selector: GovConnectorSelector | None = None,
         gov_fetcher: GovConnectorFetcher | None = None,
         gov_search: GovPlSearchClient | None = None,
@@ -245,8 +328,15 @@ class EvidenceSearchOrchestrator:
         page_size: int = 5,
         max_claims: int = MAX_CLAIMS_PER_SEARCH,
     ) -> None:
+        """EUvsDisinfo is given either as an open adapter (tests) or, in
+        production, as ``euvsdisinfo_connect``: a factory for the MCP
+        connection, which is then opened only for the duration of the
+        EUvsDisinfo queries (see ``_euvsdisinfo_batch``)."""
+        if euvsdisinfo is not None and euvsdisinfo_connect is not None:
+            raise ValueError("Pass either an EUvsDisinfo adapter or a connection factory, not both")
         self.google = google
         self.euvsdisinfo = euvsdisinfo
+        self.euvsdisinfo_connect = euvsdisinfo_connect
         self.gov_selector = gov_selector
         self.gov_fetcher = gov_fetcher or (GovConnectorFetcher() if gov_selector is not None else None)
         self.gov_search = gov_search
@@ -262,11 +352,57 @@ class EvidenceSearchOrchestrator:
         candidates = [claim for claim in claims if claim.kind != "opinion"]
         if len(candidates) > self.max_claims:
             raise ValueError("Evidence search exceeds the claim limit; split the input into batches")
-        results = await asyncio.gather(*(self._search_claim(claim) for claim in candidates))
+        euvsdisinfo_results, *results = await asyncio.gather(
+            self._euvsdisinfo_batch(candidates), *(self._search_claim(claim) for claim in candidates)
+        )
+        merged = [
+            _with_euvsdisinfo(claim_evidence, euvsdisinfo_results[claim_evidence.claim_id])
+            for claim_evidence in results
+        ]
         return EvidenceSearchResult(
-            claims=list(results),
+            claims=merged,
             skipped_opinion_ids=[claim.id for claim in claims if claim.kind == "opinion"],
         )
+
+    async def _euvsdisinfo_batch(
+        self, claims: Sequence[ClaimForVerification]
+    ) -> dict[str, list[EvidenceItem] | BaseException]:
+        """All EUvsDisinfo queries of one check, isolated from the rest of it.
+
+        The MCP client sends requests from a background task group whose
+        cancel scope covers everything inside ``connect()``. A transport
+        failure (DNS, connection reset) is not raised from ``search()``: it
+        cancels that whole scope and surfaces as an ``ExceptionGroup`` on exit.
+        Holding the connection open around the whole check therefore let one
+        unreachable source cancel the entire request. Here the scope covers
+        only these queries, and any failure marks EUvsDisinfo unavailable.
+        """
+        if not claims:
+            return {}
+        if self.euvsdisinfo is None and self.euvsdisinfo_connect is None:
+            return {claim.id: ProviderNotConfigured("euvsdisinfo is not configured") for claim in claims}
+        try:
+            if self.euvsdisinfo is not None:
+                return await self._euvsdisinfo_queries(self.euvsdisinfo, claims)
+            assert self.euvsdisinfo_connect is not None
+            async with self.euvsdisinfo_connect() as adapter:
+                return await self._euvsdisinfo_queries(adapter, claims)
+        except (Exception, BaseExceptionGroup) as error:  # noqa: B036 - anyio wraps transport errors
+            if not isinstance(error, Exception) and _contains_external_cancellation(error):
+                raise
+            log.warning("EUvsDisinfo unavailable for this check", exc_info=True)
+            return {claim.id: error for claim in claims}
+
+    @staticmethod
+    async def _euvsdisinfo_queries(
+        adapter: EUvsDisinfoAdapter, claims: Sequence[ClaimForVerification]
+    ) -> dict[str, list[EvidenceItem] | BaseException]:
+        results = await asyncio.gather(
+            # The registry is written in English; a Polish query matches it poorly.
+            *(_euvsdisinfo_items(claim.text_en or claim.text, adapter) for claim in claims),
+            return_exceptions=True,
+        )
+        return {claim.id: result for claim, result in zip(claims, results, strict=True)}
 
     async def _google_search(self, claim: ClaimForVerification) -> list[EvidenceItem]:
         results = await asyncio.gather(
@@ -274,7 +410,7 @@ class EvidenceSearchOrchestrator:
                 asyncio.to_thread(
                     _google_items, query, self.google, language_code=self.language_code, page_size=self.page_size
                 )
-                for query in search_queries(claim.text, claim.search_queries)
+                for query in search_queries(claim.text, claim.search_queries, claim.source_quotes)
             ),
             return_exceptions=True,
         )
@@ -324,16 +460,21 @@ class EvidenceSearchOrchestrator:
         return [
             EvidenceItem(
                 source="wikipedia", kind="encyclopedia", title=article.title, url=article.url,
-                publisher="Wikipedia (pl)", catalog_slug=WIKIPEDIA_SLUG, snippet=article.intro,
+                publisher="Wikipedia (pl)", catalog_slug=WIKIPEDIA_SLUG, snippet=article.intro, lang="pl",
             )
             for article in self.wikipedia.intros(titles[:WIKIPEDIA_MAX_ARTICLES])
         ]
 
     async def _search_claim(self, claim: ClaimForVerification) -> ClaimEvidence:
         # Each provider runs concurrently; result order fixes the evidence order.
+        # A provider that is not configured (missing key) is reported exactly
+        # like an outage: an explicit limitation, never "nothing found".
+        # EUvsDisinfo is queried for all claims at once (``_euvsdisinfo_batch``)
+        # and merged in by ``search``.
         providers: dict[EvidenceSource, Awaitable[list[EvidenceItem]]] = {
-            "google_fact_check": self._google_search(claim),
-            "euvsdisinfo": _euvsdisinfo_items(claim.text, self.euvsdisinfo),
+            "google_fact_check": self._google_search(claim)
+            if self.google is not None
+            else _unconfigured("google_fact_check"),
         }
         countries = [code for code in claim.countries if code != "PL"]
         if self.odyseusz is not None and countries:

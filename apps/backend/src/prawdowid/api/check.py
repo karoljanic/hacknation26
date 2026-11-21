@@ -16,6 +16,7 @@ merit result.
 
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from datetime import datetime
 from enum import StrEnum
 import logging
 from typing import Literal, Annotated
@@ -28,6 +29,7 @@ from prawdowid.api.dependencies import PipelineUnavailable, build_pipeline
 from prawdowid.api.rate_limit import admit_check
 from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.enums import Channel, ClaimKind, RunStatus, Strength, Verdict
+from prawdowid.domain.preparation import PreparedInput
 from prawdowid.services.pipeline import PipelineResult, VerificationPipeline
 from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES, VIDEO_TYPES, NoExtractableContentError
 
@@ -62,6 +64,9 @@ class Source(BaseModel):
     title: str
     url: HttpUrl
     publisher: str = Field(description="Wydawca, np. Demagog, gov.pl.")
+    published_at: datetime | None = Field(
+        default=None, description="Data publikacji (lub weryfikacji) źródła; brak, gdy źródło jej nie podaje."
+    )
     quote: str | None = Field(default=None, description="Dosłowny fragment źródła, na którym oparto ocenę.")
 
 
@@ -166,6 +171,7 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
                         outcome.evidence[citation.evidence_index].item.publisher
                         or outcome.evidence[citation.evidence_index].item.source
                     ),
+                    published_at=outcome.evidence[citation.evidence_index].item.published_at,
                     quote=citation.quote,
                 )
                 for citation in outcome.assessment.citations
@@ -271,18 +277,30 @@ async def check(
                 )
             else:
                 preparer = pipeline.intake.preparer
-                if input_type is InputType.URL:
-                    prepared = preparer.prepare_url(url)  # type: ignore[arg-type]
-                else:
-                    assert file is not None and media is not None
-                    mime_type = (file.content_type or "").lower()
-                    prepared = preparer.prepare_media(Media(data=media, mime_type=mime_type),
-                                                       source_name=file.filename or "upload")
-                if text is not None:
-                    prepared = prepared.model_copy(
-                        update={"segments": _prepend_question(prepared.segments, text)}
-                    )
-                result = await pipeline.run_prepared(prepared, channel=channel)
+                mime_type = (file.content_type or "").lower() if file is not None else ""
+                source_name = (file.filename if file is not None else None) or "upload"
+                question = text
+
+                def prepare() -> PreparedInput:
+                    # Blocking (HTTP fetch / model reading the media): the
+                    # pipeline runs it in a worker thread, after the run row
+                    # exists, so a failure here is logged like any other.
+                    if input_type is InputType.URL:
+                        prepared = preparer.prepare_url(url)  # type: ignore[arg-type]
+                    else:
+                        assert media is not None
+                        prepared = preparer.prepare_media(
+                            Media(data=media, mime_type=mime_type), source_name=source_name
+                        )
+                    if question is not None:
+                        prepared = prepared.model_copy(
+                            update={"segments": _prepend_question(prepared.segments, question)}
+                        )
+                    return prepared
+
+                result = await pipeline.run_deferred(
+                    prepare, channel=channel, url=url if input_type is InputType.URL else None
+                )
     except PipelineUnavailable as exc:
         logger.error("Pipeline unavailable: %s", exc)
         return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=str(exc))
@@ -290,7 +308,10 @@ async def check(
         logger.info("Input could not be prepared: %s", exc)
         return CheckResponse(run_id="", status=RunStatus.NEEDS_CLARIFICATION, message=INVALID_INPUT_MESSAGE)
     except Exception:  # provider outage, SDK bug, ... never a merit result
-        logger.warning("Unexpected failure before a run could be opened", exc_info=True)
+        # This can happen before a run exists (pipeline construction) or after
+        # (an error the pipeline re-raised); in the latter case the pipeline
+        # has already closed that run as tech_failure.
+        logger.warning("Unexpected failure in POST /check; no run_id available here", exc_info=True)
         return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=TECH_FAILURE_MESSAGE)
 
     return _to_check_response(result)

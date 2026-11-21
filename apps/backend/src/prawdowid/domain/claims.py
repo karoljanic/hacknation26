@@ -78,6 +78,11 @@ class Claim(BaseModel):
     # Established, time-independent fact of history, geography, science or
     # mathematics; only such claims may be answered from general knowledge.
     general_knowledge: bool = False
+    # Search aid only (EUvsDisinfo and other English-language sources); never
+    # shown to the user or stored as the claim's wording.
+    text_en: str | None = Field(
+        default=None, description="Faithful English translation of text, for searching English sources."
+    )
 
     @field_validator("id", "text")
     @classmethod

@@ -7,11 +7,12 @@ used for user-submitted URLs) fetches and extracts their article text.
 """
 
 import json
+import logging
 from collections.abc import Sequence
 
 from prawdowid.ai.adapters.decision import BooleanQuestion, DecisionAdapter
 from prawdowid.domain.evidence import EvidenceForAssessment, EvidenceItem
-from prawdowid.services.preparation import InputPreparer, NoExtractableContentError
+from prawdowid.services.preparation import InputPreparer
 
 MAX_CANDIDATES_PER_CLAIM = 8  # bounds decision-adapter cost
 # Items whose snippet already is the full text and whose page is a JS app the
@@ -19,6 +20,8 @@ MAX_CANDIDATES_PER_CLAIM = 8  # bounds decision-adapter cost
 FULL_TEXT_SOURCES = frozenset({"odyseusz"})
 MAX_SELECTED_PER_CLAIM = 3  # bounds crawl latency/cost
 SELECTION_THRESHOLD = 0.5
+
+log = logging.getLogger(__name__)
 
 SELECTION_INSTRUCTIONS = (
     "Źródło: {title} ({publisher}), {url}\n"
@@ -33,7 +36,7 @@ class SublinkSelector:
     def __init__(
         self,
         *,
-        decision: DecisionAdapter,
+        decision: DecisionAdapter | None,
         preparer: InputPreparer,
         max_candidates: int = MAX_CANDIDATES_PER_CLAIM,
         max_selected: int = MAX_SELECTED_PER_CLAIM,
@@ -79,7 +82,14 @@ class SublinkSelector:
             },
             ensure_ascii=False,
         )
-        result = self.decision.decide(state, questions)
+        if self.decision is None:
+            return bundle  # no decision provider configured: assess on snippets
+        try:
+            result = self.decision.decide(state, questions)
+        except Exception:
+            # Full texts only sharpen quotes; the snippets are still valid evidence.
+            log.warning("Sublink selection failed; assessing on search snippets", exc_info=True)
+            return bundle
         ranked = sorted(
             range(len(candidates)), key=lambda index: result.answers[str(index)].noul, reverse=True  # type: ignore[union-attr]
         )
@@ -97,7 +107,9 @@ class SublinkSelector:
     def _fetch(self, url: str) -> str | None:
         try:
             prepared = self.preparer.prepare_url(url)
-        except (NoExtractableContentError, ValueError, OSError, TimeoutError):
-            return None  # a failed fetch keeps the snippet; it is not a pipeline error
+        except Exception:  # HTTP 403/5xx, timeouts, unreadable pages, ...
+            # A failed fetch keeps the snippet; it is not a pipeline error.
+            log.info("Full-text fetch failed for %s; keeping the snippet", url, exc_info=True)
+            return None
         text = "\n\n".join(segment.text for segment in prepared.segments)
         return text or None

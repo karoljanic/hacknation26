@@ -9,6 +9,7 @@ Only claims with at least one evidence item go into the batched call.
 """
 
 import json
+import logging
 import re
 from collections.abc import Sequence
 
@@ -18,8 +19,12 @@ from prawdowid.domain.evidence import (
     ClaimAssessmentOutput,
     ClaimEvidenceBundle,
     ClaimForVerification,
+    InjectionNote,
     SubmissionAssessmentOutput,
 )
+from prawdowid.domain.quotes import locate_quote, source_span
+
+log = logging.getLogger(__name__)
 
 MAX_CLAIMS_PER_CALL = 10
 DEFINITIVE_VERDICTS = {"confirmed", "false", "misleading"}
@@ -237,20 +242,23 @@ REQUIRED_RELATION_BY_VERDICT = {"confirmed": "supports", "false": "refutes", "mi
 
 
 def find_verbatim(quote: str, text: str) -> str | None:
-    """The exact span of ``text`` that ``quote`` reproduces, or ``None``.
+    """The exact span of ``text`` that ``quote`` reproduces, or ``None``
+    (tolerant matching, see ``domain.quotes``)."""
+    return source_span(text, quote)
 
-    Models rewrite whitespace (non-breaking spaces and line breaks in web pages
-    come back as plain spaces), so words must match exactly in order but any
-    whitespace between them is accepted. The returned span is the source's
-    own text, so what is stored and shown is always a true verbatim quote.
-    """
-    if quote in text:
-        return quote
-    words = quote.split()
-    if not words:
-        return None
-    match = re.search(r"\s+".join(map(re.escape, words)), text)
-    return match.group(0) if match else None
+
+def _verify_citations(bundle: ClaimEvidenceBundle, assessment: ClaimAssessmentOutput) -> ClaimAssessmentOutput:
+    """Checks every citation against its evidence text and returns the
+    assessment with each quote replaced by the source's own verbatim span
+    (see ``domain.quotes``); raises ``RuntimeError`` if any check fails."""
+    _validate_citations(bundle, assessment)
+    citations = [
+        citation.model_copy(
+            update={"quote": source_span(bundle.evidence[citation.evidence_index].text, citation.quote)}
+        )
+        for citation in assessment.citations
+    ]
+    return assessment.model_copy(update={"citations": citations})
 
 
 def _validate_citations(bundle: ClaimEvidenceBundle, assessment: ClaimAssessmentOutput) -> None:
@@ -268,10 +276,9 @@ def _validate_citations(bundle: ClaimEvidenceBundle, assessment: ClaimAssessment
     for citation in assessment.citations:
         if citation.evidence_index >= len(bundle.evidence):
             raise RuntimeError(f"Claim {assessment.claim_id}: citation references an unknown evidence item")
-        verbatim = find_verbatim(citation.quote, bundle.evidence[citation.evidence_index].text)
-        if verbatim is None:
+        text = bundle.evidence[citation.evidence_index].text
+        if locate_quote(text, citation.quote) is None:
             raise RuntimeError(f"Claim {assessment.claim_id}: citation quote absent from its evidence text")
-        citation.quote = verbatim
 
 
 class AssessmentGenerator:
@@ -288,7 +295,99 @@ class AssessmentGenerator:
         if len(by_id) != len(bundles):
             raise ValueError("Claim IDs must be unique")
 
-        prompt = json.dumps(
+        # Every claim is validated on its own: one paraphrased quote must not
+        # discard the verdicts of the other claims in the submission. Models
+        # occasionally paraphrase a quote, so only the claims that failed are
+        # asked again; a claim that is still invalid after the last attempt
+        # abstains (``unverified_assessment``) instead of getting an unchecked verdict.
+        accepted: dict[str, ClaimAssessmentOutput] = {}
+        notes: list[InjectionNote] = []
+        failures: dict[str, str] = {}
+        usage = _Usage()
+        pending = list(bundles)
+        for _attempt in range(VALIDATION_ATTEMPTS):
+            result = self.llm.generate_structured(
+                _prompt(pending), SubmissionAssessmentOutput, instructions=ASSESSMENT_INSTRUCTIONS
+            )
+            usage.add(result)
+            pending_ids = {bundle.claim_id for bundle in pending}
+            failures = {claim_id: "model did not assess this claim" for claim_id in pending_ids}
+            for assessment in result.data.assessments:
+                claim_id = assessment.claim_id
+                if claim_id not in pending_ids or claim_id in accepted:
+                    continue  # unknown or duplicate id: never trusted
+                bundle = by_id[claim_id]
+                assessment = _enforce_basis(
+                    bundle,
+                    _correct_announcement_confirmation(bundle, _correct_euvsdisinfo_confirmation(bundle, assessment)),
+                )
+                try:
+                    assessment = _verify_citations(bundle, assessment)
+                except RuntimeError as error:
+                    failures[claim_id] = str(error)
+                    continue
+                accepted[claim_id] = assessment
+                failures.pop(claim_id, None)
+            notes.extend(_valid_injection_notes(result.data.injection_notes, by_id, notes))
+            pending = [bundle for bundle in pending if bundle.claim_id not in accepted]
+            if not pending:
+                break
+        for claim_id, reason in failures.items():
+            log.warning("Assessment of claim %s rejected after %d attempts: %s", claim_id, VALIDATION_ATTEMPTS, reason)
+            accepted[claim_id] = unverified_assessment(claim_id)
+
+        data = SubmissionAssessmentOutput(
+            assessments=[accepted[bundle.claim_id] for bundle in bundles], injection_notes=notes
+        )
+        return StructuredResult(
+            data=data,
+            requested_model=usage.requested_model,
+            model_version=usage.model_version,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+
+
+class _Usage:
+    """Token usage summed over every attempt (retries cost money too)."""
+
+    def __init__(self) -> None:
+        self.requested_model = ""
+        self.model_version: str | None = None
+        self.input_tokens: int | None = None
+        self.output_tokens: int | None = None
+
+    def add(self, result: StructuredResult) -> None:
+        self.requested_model = result.requested_model
+        self.model_version = result.model_version
+        if result.input_tokens is not None:
+            self.input_tokens = (self.input_tokens or 0) + result.input_tokens
+        if result.output_tokens is not None:
+            self.output_tokens = (self.output_tokens or 0) + result.output_tokens
+
+
+def _valid_injection_notes(
+    notes: Sequence[InjectionNote], by_id: dict[str, ClaimEvidenceBundle], seen: Sequence[InjectionNote]
+) -> list[InjectionNote]:
+    """Only notes quoting real evidence text are kept; a bogus note is dropped,
+    it does not invalidate the assessments."""
+    valid: list[InjectionNote] = []
+    for note in notes:
+        bundle = by_id.get(note.claim_id)
+        if bundle is None or note.evidence_index >= len(bundle.evidence):
+            continue
+        excerpt = source_span(bundle.evidence[note.evidence_index].text, note.excerpt)
+        if excerpt is None:
+            continue
+        note = note.model_copy(update={"excerpt": excerpt})
+        if note in seen or note in valid:
+            continue
+        valid.append(note)
+    return valid
+
+
+def _prompt(bundles: Sequence[ClaimEvidenceBundle]) -> str:
+    return json.dumps(
             {
                 "claims": [
                     {
@@ -318,46 +417,24 @@ class AssessmentGenerator:
             },
             ensure_ascii=False,
         )
-        # Models occasionally paraphrase a quote; one retry usually fixes it, and a
-        # second invalid answer still fails instead of yielding an unchecked verdict.
-        for attempt in range(VALIDATION_ATTEMPTS):
-            try:
-                return self._assess_once(prompt, by_id)
-            except RuntimeError:
-                if attempt == VALIDATION_ATTEMPTS - 1:
-                    raise
-        raise AssertionError("unreachable")
 
-    def _assess_once(
-        self, prompt: str, by_id: dict[str, ClaimEvidenceBundle]
-    ) -> StructuredResult[SubmissionAssessmentOutput]:
-        result = self.llm.generate_structured(
-            prompt, SubmissionAssessmentOutput, instructions=ASSESSMENT_INSTRUCTIONS
-        )
-        assessed_ids = [assessment.claim_id for assessment in result.data.assessments]
-        if set(assessed_ids) != set(by_id) or len(assessed_ids) != len(by_id):
-            raise RuntimeError("Model did not assess exactly the submitted claims")
-        result.data.assessments = [
-            _enforce_basis(
-                by_id[assessment.claim_id],
-                _correct_announcement_confirmation(
-                    by_id[assessment.claim_id],
-                    _correct_euvsdisinfo_confirmation(by_id[assessment.claim_id], assessment),
-                ),
-            )
-            for assessment in result.data.assessments
-        ]
-        for assessment in result.data.assessments:
-            _validate_citations(by_id[assessment.claim_id], assessment)
-        for note in result.data.injection_notes:
-            bundle = by_id.get(note.claim_id)
-            if bundle is None or note.evidence_index >= len(bundle.evidence):
-                raise RuntimeError("Injection note references an unknown claim or evidence item")
-            verbatim = find_verbatim(note.excerpt, bundle.evidence[note.evidence_index].text)
-            if verbatim is None:
-                raise RuntimeError("Injection note excerpt absent from its evidence text")
-            note.excerpt = verbatim
-        return result
+
+def unverified_assessment(claim_id: str) -> ClaimAssessmentOutput:
+    """Deterministic fallback when the model's answer for this claim could not
+    be checked against its sources (e.g. a paraphrased quote, twice): abstain
+    rather than publish a verdict nobody verified."""
+    return ClaimAssessmentOutput(
+        claim_id=claim_id,
+        verdict="insufficient_evidence",
+        strength="weak",
+        reasons=AssessmentReasons(source_tiers=[], independent_sources=0, conflicting_sources=False),
+        explanation=(
+            "Nie wiadomo. Znalazłem materiały na ten temat, ale nie udało się wiarygodnie powiązać oceny "
+            "z dosłownymi fragmentami źródeł, więc wstrzymuję się od odpowiedzi."
+        ),
+        limitations="Automatyczna ocena nie przeszła weryfikacji cytatów. Sprawdź podane źródła samodzielnie.",
+        citations=[],
+    )
 
 
 def opinion_assessment(claim: ClaimForVerification) -> ClaimAssessmentOutput:
@@ -383,13 +460,30 @@ SOURCE_LABELS = {
 }
 
 
+def _unavailable_note(unavailable_sources: Sequence[str]) -> str:
+    # A missing key (provider not configured) is reported like an outage.
+    names = ", ".join(sorted(SOURCE_LABELS.get(source, source) for source in unavailable_sources))
+    return f"Z powodu błędu technicznego nie udało się sprawdzić: {names}. Spróbuj ponownie później."
+
+
+def with_unavailable_sources(
+    assessment: ClaimAssessmentOutput, unavailable_sources: Sequence[str]
+) -> ClaimAssessmentOutput:
+    """A verdict reached without some sources must say so: a missing provider
+    is a stated limitation, never silently equal to 'nothing there'."""
+    if not unavailable_sources:
+        return assessment
+    note = _unavailable_note(unavailable_sources)
+    limitations = f"{assessment.limitations} {note}" if assessment.limitations else note
+    return assessment.model_copy(update={"limitations": limitations})
+
+
 def no_evidence_assessment(claim: ClaimForVerification, *, unavailable_sources: Sequence[str] = ()) -> ClaimAssessmentOutput:
     """Deterministic result when no evidence was found anywhere: abstain
     instead of guessing (never a probabilistic LLM decision)."""
     limitations = None
     if unavailable_sources:
-        names = ", ".join(sorted(SOURCE_LABELS.get(source, source) for source in unavailable_sources))
-        limitations = f"Z powodu błędu technicznego nie udało się sprawdzić: {names}. Spróbuj ponownie później."
+        limitations = _unavailable_note(unavailable_sources)
     return ClaimAssessmentOutput(
         claim_id=claim.id,
         verdict="insufficient_evidence",

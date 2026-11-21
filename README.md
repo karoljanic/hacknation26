@@ -170,6 +170,27 @@ python examples/extract_claims.py --store --url "https://example.org/artykul" --
 Testy `tests/test_intake.py` używają atrap modelu i embeddingu, ale
 prawdziwej bazy z `DATABASE_URL`; bez dostępnej bazy są pomijane.
 
+W `POST /check` przebieg zamyka dopiero `VerificationPipeline`, po ocenie
+wszystkich tez (do tego czasu ma status `running`). Zapisuje wtedy w
+`verification_run`:
+
+- status i czas całego sprawdzenia (`latency_ms`, od przyjęcia do werdyktu);
+- zużycie każdego wywołania modelu w `models`: odczyt mediów, ekstrakcja,
+  embedding, decyzje Jev (wybór działów gov.pl i linków do pobrania) i ocena,
+  łącznie z ponowieniami;
+- szacowany koszt w `est_cost_usd`, gdy ustawiono ceny modeli
+  (`MODEL_PRICES_USD_PER_MTOK`, np. `{"gemini-3.5-flash": [0.3, 2.5], "jev-1.14.0": [0.1, 0.4]}`
+  w USD za milion tokenów wejścia i wyjścia; nazwy modeli tak, jak zapisuje je
+  `models`, np. Jev podaje wersję zamiast `jev-latest`). Gdy któryś użyty model
+  z tokenami nie ma ceny, koszt zostaje pusty zamiast zaniżonego;
+- wykryte próby prompt injection w `injection_flags` (adres źródła i dosłowny
+  fragment). Nie zmieniają one werdyktu. Ukryty tekst stron (CSS, `aria-hidden`,
+  komentarze HTML) jest usuwany, zanim trafi do modelu.
+
+Wymagany jest tylko `GEMINI_API_KEY`. Brak klucza lub awaria Google Fact Check,
+EUvsDisinfo albo TypeSafe (Jev) nie blokuje sprawdzenia: odpowiedź podaje
+niedostępne źródło w ograniczeniach danej tezy.
+
 ## Struktura
 
 - `apps/web` — interfejs Next.js.
