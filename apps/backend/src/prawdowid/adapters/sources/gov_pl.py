@@ -1,9 +1,9 @@
 """Wspólny parser i konektor dla stron CMS gov.pl (www.gov.pl/web/...).
 
 Obsługuje:
-- strony listujące (np. /aktualnosci, /ostrzezenia, /komunikaty-nawigacyjne),
+- strony listujące (np. /aktualnosci, /ostrzezenia, /komunikaty-nawigacyjne) z paginacją,
 - pojedyncze strony informacyjne (np. /prawa-pasazerow, /19-111),
-- załączniki PDF pod /attachment/... (np. Raport Dobowy RCB, Wody Polskie).
+- załączniki PDF pod /attachment/... (np. Raport Dobowy RCB, Wody Polskie) z limitem znaków.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ import re
 import ssl
 import time
 import unicodedata
-from typing import Protocol
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from typing import Protocol, TypeVar
+from urllib.parse import parse_qs, urljoin, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup, Comment, Tag
@@ -32,6 +32,7 @@ except ImportError:  # pragma: no cover - opcjonalna zależność do PDF
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
 ALLOWED_HOSTS = frozenset({"gov.pl", "www.gov.pl"})
 DEFAULT_USER_AGENT = "Prawdowid/0.1 (gov.pl corpus ingestion)"
+DEFAULT_MAX_PDF_CHARS = 30_000
 
 _UNTRUSTED_TAGS = ("script", "style", "noscript", "iframe", "svg", "object", "embed", "template")
 _CHROME_TAGS = ("nav", "header", "footer", "aside", "form")
@@ -75,6 +76,15 @@ class RawResource:
 
 class GovResourceFetcher(Protocol):
     def get(self, url: str) -> RawResource: ...
+
+
+class _HasPublishedAt(Protocol):
+    @property
+    def published_at(self) -> datetime | None: ...
+
+
+T = TypeVar("T", bound=_HasPublishedAt)
+_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -193,6 +203,21 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(normalize_text(text).encode("utf-8")).hexdigest()
 
 
+def sort_latest(docs: list[T], *, limit: int | None = None) -> list[T]:
+    """Sortuje dokumenty od najnowszych (published_at malejąco) i przycina do limitu."""
+    if limit is not None:
+        if limit < 0:
+            raise ValueError("limit nie może być ujemny")
+        if limit == 0:
+            return []
+    ordered = sorted(
+        docs,
+        key=lambda doc: (doc.published_at is not None, doc.published_at or _MIN_UTC),
+        reverse=True,
+    )
+    return ordered[:limit] if limit is not None else ordered
+
+
 def _ensure_gov_pl_url(url: str) -> None:
     parsed = urlsplit(url)
     host = (parsed.hostname or "").lower()
@@ -211,6 +236,17 @@ def _extract_department(url: str) -> str | None:
     if len(parts) >= 2 and parts[0] == "web":
         return parts[1].lower()
     return None
+
+
+def _extract_page_number(url: str) -> int:
+    qs = parse_qs(urlsplit(url).query)
+    for key in ("page", "strona"):
+        if key in qs and qs[key]:
+            try:
+                return max(1, int(qs[key][0]))
+            except ValueError:
+                pass
+    return 1
 
 
 def _is_hidden_tag(tag: Tag) -> bool:
@@ -281,54 +317,126 @@ def parse_gov_date(value: str | None) -> datetime | None:
     return None
 
 
+def extract_next_page_url(
+    html: bytes | str,
+    current_url: str,
+    *,
+    encoding: str | None = None,
+) -> str | None:
+    """Znajduje link do następnej strony paginacji na gov.pl (np. ?page=2)."""
+    soup = sanitize_soup(html, encoding=encoding)
+    current_page = _extract_page_number(current_url)
+    target_page = current_page + 1
+    current_canonical = _canonical_url(current_url)
+
+    def _valid(href: str) -> str | None:
+        full = _canonical_url(urljoin(current_url, href.strip()))
+        parts = urlsplit(full)
+        if (parts.hostname or "").lower() not in ALLOWED_HOSTS or full == current_canonical:
+            return None
+        return full
+
+    rel_next = soup.find(
+        "a",
+        rel=lambda r: bool(
+            r and "next" in [x.lower() for x in (r if isinstance(r, list) else [r])]
+        ),
+    )
+    if rel_next and rel_next.get("href"):
+        candidate = _valid(str(rel_next["href"]))
+        if candidate:
+            return candidate
+
+    for anchor in soup.find_all("a", href=True):
+        href = str(anchor["href"]).strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        candidate = _valid(href)
+        if not candidate:
+            continue
+        qs = parse_qs(urlsplit(candidate).query)
+        page_vals = qs.get("page") or qs.get("strona") or []
+        if str(target_page) in page_vals:
+            return candidate
+        label = normalize_text(anchor.get_text(" ", strip=True)).lower()
+        aria = str(anchor.get("aria-label") or "").lower()
+        if (
+            any(tok in label or tok in aria for tok in ("następna", "nastepna", "next"))
+            and page_vals
+            and _extract_page_number(candidate) > current_page
+        ):
+            return candidate
+
+    return None
+
+
 def extract_listing_links(
     html: bytes | str,
     listing_url: str,
     *,
     encoding: str | None = None,
-    limit: int = 10,
+    limit: int | None = 10,
 ) -> list[str]:
-    """Wyciąga linki do najnowszych artykułów z listującej podstrony gov.pl."""
+    """Wyciąga linki do najnowszych artykułów z listującej podstrony gov.pl.
+
+    Najpierw przeszukuje standardowe kontenery list (.art-prev, .article-area__list),
+    a jeśli nie zwrócą pasujących linków — sięga po .editor-content / <article> / <main>.
+    Akceptuje też oddziały regionalne (/web/{dept}-..., np. /web/wody-polskie-gdansk/...).
+    """
     soup = sanitize_soup(html, encoding=encoding)
     for chrome in soup.find_all(_CHROME_TAGS):
         chrome.decompose()
 
     base_canonical = _canonical_url(listing_url)
     department = _extract_department(listing_url)
-    dept_prefix = f"/web/{department}/" if department else "/web/"
+    allowed_prefixes = (
+        (f"/web/{department}/", f"/web/{department}-") if department else ("/web/",)
+    )
 
-    # Priorytet: typowe kontenery list artykułów na gov.pl; fallback: całe <main>.
-    containers = (
-        soup.select(".art-prev, .article-area__list, article ul, main .list")
-        or [soup.find("main") or soup.body or soup]
+    primary_containers = soup.select(".art-prev, .article-area__list")
+    fallback_containers = [
+        node
+        for node in (
+            soup.select_one(".editor-content"),
+            soup.find("article"),
+            soup.find("main"),
+            soup.body,
+        )
+        if node is not None
+    ]
+    container_groups = (
+        [primary_containers, fallback_containers] if primary_containers else [fallback_containers]
     )
 
     found: list[str] = []
     seen: set[str] = {base_canonical}
 
-    for container in containers:
-        for anchor in container.find_all("a", href=True):
-            href = str(anchor["href"]).strip()
-            if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
-                continue
-            full_url = _canonical_url(urljoin(listing_url, href))
-            parts = urlsplit(full_url)
-            if (parts.hostname or "").lower() not in ALLOWED_HOSTS:
-                continue
-            if not parts.path.lower().startswith(dept_prefix):
-                continue
-            if "page=" in parts.query.lower():
-                continue
-            last_segment = parts.path.rstrip("/").rsplit("/", 1)[-1].lower()
-            if last_segment in _SKIP_PATH_SEGMENTS:
-                continue
-            if full_url in seen:
-                continue
+    for containers in container_groups:
+        for container in containers:
+            for anchor in container.find_all("a", href=True):
+                href = str(anchor["href"]).strip()
+                if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+                    continue
+                full_url = _canonical_url(urljoin(listing_url, href))
+                parts = urlsplit(full_url)
+                if (parts.hostname or "").lower() not in ALLOWED_HOSTS:
+                    continue
+                if not parts.path.lower().startswith(allowed_prefixes):
+                    continue
+                if "page=" in parts.query.lower():
+                    continue
+                last_segment = parts.path.rstrip("/").rsplit("/", 1)[-1].lower()
+                if last_segment in _SKIP_PATH_SEGMENTS:
+                    continue
+                if full_url in seen:
+                    continue
 
-            seen.add(full_url)
-            found.append(full_url)
-            if len(found) >= limit:
-                return found
+                seen.add(full_url)
+                found.append(full_url)
+                if limit is not None and len(found) >= limit:
+                    return found
+        if found:
+            break
 
     return found
 
@@ -354,11 +462,7 @@ def extract_attachment_links(
         is_pdf_url = parts.path.lower().endswith(".pdf")
         label = normalize_text(anchor.get_text(" ", strip=True))
         classes = " ".join(anchor.get("class") or []).lower()
-        looks_like_pdf = (
-            is_pdf_url
-            or "pdf" in label.lower()
-            or "file-download" in classes
-        )
+        looks_like_pdf = is_pdf_url or "pdf" in label.lower() or "file-download" in classes
 
         if (is_gov_attachment and looks_like_pdf) or is_pdf_url:
             if full_url not in seen:
@@ -369,12 +473,32 @@ def extract_attachment_links(
     return results
 
 
-def extract_pdf_text(pdf_bytes: bytes) -> str:
+def extract_pdf_text(pdf_bytes: bytes, *, max_chars: int | None = DEFAULT_MAX_PDF_CHARS) -> str:
+    """Wyciąga tekst z PDF-a; przy przekroczeniu ``max_chars`` bezpiecznie go przycina."""
     if PdfReader is None:
         raise RuntimeError("Brak pakietu pypdf — zainstaluj `pip install pypdf`, aby czytać PDF.")
     reader = PdfReader(io.BytesIO(pdf_bytes))
-    pages = [normalize_text(page.extract_text() or "") for page in reader.pages]
-    return "\n\n".join(page for page in pages if page)
+    pages: list[str] = []
+    total = 0
+    truncated = False
+
+    for page in reader.pages:
+        cleaned = normalize_text(page.extract_text() or "")
+        if not cleaned:
+            continue
+        if max_chars is not None and total + len(cleaned) > max_chars:
+            remaining = max(0, max_chars - total)
+            if remaining > 0:
+                pages.append(cleaned[:remaining].rstrip())
+            truncated = True
+            break
+        pages.append(cleaned)
+        total += len(cleaned) + 2
+
+    text = "\n\n".join(pages)
+    if truncated:
+        text = f"{text}\n[... treść załącznika PDF skrócona do {max_chars} znaków ...]"
+    return text
 
 
 def parse_gov_article_html(
@@ -386,7 +510,6 @@ def parse_gov_article_html(
     """Parsuje pojedynczą stronę gov.pl. Zwraca (tytuł, tekst, published_at, pdf_links)."""
     soup = sanitize_soup(html, encoding=encoding)
 
-    # 1. Data publikacji (gov.pl najczęściej używa .event-date lub meta article:published_time)
     published_at: datetime | None = None
     for meta_attrs in (
         {"property": "article:published_time"},
@@ -407,7 +530,6 @@ def parse_gov_article_html(
                 if published_at is not None:
                     break
 
-    # 2. Tytuł (na stronach artykułów gov.pl tytuł właściwy często jest w article h2)
     title: str | None = None
     for selector in (".article-area__article h2", "article h2", "article h1", "main h1"):
         heading = soup.select_one(selector)
@@ -424,10 +546,8 @@ def parse_gov_article_html(
         title = normalize_text(soup.title.get_text(" ", strip=True))
     title = title or url
 
-    # 3. Załączniki PDF zanim wytniemy elementy pomocnicze
     pdf_links = extract_attachment_links(soup, url)
 
-    # 4. Treść właściwa (.intro + .editor-content to standard CMS gov.pl)
     for chrome in soup.find_all(_CHROME_TAGS):
         chrome.decompose()
 
@@ -478,55 +598,118 @@ class GovPlParser:
         *,
         include_pdf_attachments: bool = True,
         max_pdf_per_article: int = 2,
+        max_pdf_chars: int | None = DEFAULT_MAX_PDF_CHARS,
         min_text_length: int = 40,
+        request_delay: float = 0.0,
     ) -> None:
         self.fetcher = fetcher
         self.include_pdf_attachments = include_pdf_attachments
         self.max_pdf_per_article = max_pdf_per_article
+        self.max_pdf_chars = max_pdf_chars
         self.min_text_length = min_text_length
+        self.request_delay = max(0.0, request_delay)
 
     def fetch_page(self, url: str) -> GovPlDocument | None:
         """Pobiera i parsuje pojedynczą stronę artykułu lub stronę informacyjną gov.pl."""
         resource = self.fetcher.get(url)
         return self._parse_resource(resource)
 
+    def fetch_latest(
+        self,
+        listing_url: str,
+        *,
+        limit: int = 10,
+        max_pages: int = 10,
+        fallback_to_page: bool = True,
+    ) -> list[GovPlDocument]:
+        """Pobiera do ``limit`` najnowszych dokumentów z sekcji gov.pl (z paginacją)."""
+        return self.fetch_listing(
+            listing_url,
+            limit=limit,
+            max_pages=max_pages,
+            fallback_to_page=fallback_to_page,
+        )
+
     def fetch_listing(
         self,
         listing_url: str,
         *,
         limit: int = 8,
+        max_pages: int = 10,
         fallback_to_page: bool = True,
     ) -> list[GovPlDocument]:
-        """Pobiera listę najnowszych artykułów z sekcji gov.pl (np. /aktualnosci, /ostrzezenia)."""
-        resource = self.fetcher.get(listing_url)
-        links = extract_listing_links(
-            resource.content,
-            resource.url,
-            encoding=resource.encoding,
-            limit=limit,
-        )
+        """Pobiera listę najnowszych artykułów z sekcji gov.pl, przechodząc po stronach paginacji."""
+        if limit < 0:
+            raise ValueError("limit nie może być ujemny")
+        if limit == 0:
+            return []
 
         docs: list[GovPlDocument] = []
-        for article_url in links:
-            try:
-                doc = self.fetch_page(article_url)
-                if doc is not None:
-                    docs.append(doc)
-            except Exception:
-                # Awaria pojedynczego artykułu nie przerywa całej sekcji.
-                continue
+        seen_articles: set[str] = set()
+        seen_pages: set[str] = set()
+        current_url: str | None = listing_url
+        first_resource: RawResource | None = None
 
-        # Jeśli strona nie jest listą (np. raport-dobowy3 z załącznikami PDF), parsuj ją samą.
-        if not docs and fallback_to_page:
-            single = self._parse_resource(resource)
+        for page_idx in range(max(1, max_pages)):
+            if current_url is None:
+                break
+            canonical_page = _canonical_url(current_url)
+            if canonical_page in seen_pages:
+                break
+            seen_pages.add(canonical_page)
+
+            try:
+                resource = self.fetcher.get(current_url)
+            except Exception:
+                if page_idx == 0:
+                    raise
+                break
+
+            if first_resource is None:
+                first_resource = resource
+
+            links = extract_listing_links(
+                resource.content,
+                resource.url,
+                encoding=resource.encoding,
+                limit=None,
+            )
+            new_links = [link for link in links if link not in seen_articles]
+            if not new_links:
+                break
+
+            for article_url in new_links:
+                seen_articles.add(article_url)
+                if self.request_delay > 0:
+                    time.sleep(self.request_delay)
+                try:
+                    doc = self.fetch_page(article_url)
+                    if doc is not None:
+                        docs.append(doc)
+                        if len(docs) >= limit:
+                            break
+                except Exception:
+                    continue
+
+            if len(docs) >= limit:
+                break
+
+            current_url = extract_next_page_url(
+                resource.content,
+                resource.url,
+                encoding=resource.encoding,
+            )
+
+        if not docs and fallback_to_page and first_resource is not None:
+            single = self._parse_resource(first_resource)
             if single is not None:
                 docs.append(single)
 
-        return docs
+        return sort_latest(docs, limit=limit)
 
     def _parse_resource(self, resource: RawResource) -> GovPlDocument | None:
         if "pdf" in resource.content_type or resource.content.startswith(b"%PDF"):
-            pdf_text = extract_pdf_text(resource.content)
+            pdf_text = extract_pdf_text(resource.content, max_chars=self.max_pdf_chars)
             if len(pdf_text) < self.min_text_length:
                 return None
             return GovPlDocument(
@@ -554,8 +737,10 @@ class GovPlParser:
                     att_res = self.fetcher.get(att_url)
                     if "pdf" not in att_res.content_type and not att_res.content.startswith(b"%PDF"):
                         continue
-                    pdf_text = extract_pdf_text(att_res.content)
-                    attachments.append(GovAttachment(url=att_res.url, title=att_title, text=pdf_text))
+                    pdf_text = extract_pdf_text(att_res.content, max_chars=self.max_pdf_chars)
+                    attachments.append(
+                        GovAttachment(url=att_res.url, title=att_title, text=pdf_text)
+                    )
                     if pdf_text:
                         combined_sections.append(f"[Załącznik: {att_title}]\n{pdf_text}")
                 except Exception as exc:

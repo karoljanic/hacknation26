@@ -24,6 +24,7 @@ from prawdowid.adapters.sources.gov_pl import (
     normalize_text,
     parse_gov_date,
     sanitize_soup,
+    sort_latest,
 )
 
 RSO_ALL_XML_URL = "https://komunikaty.tvp.pl/komunikatyxml/wszystkie/wszystkie/0?_format=xml"
@@ -185,7 +186,7 @@ def parse_rso_xml(
     province: str | None = None,
     limit: int | None = None,
 ) -> list[RsoDocument]:
-    """Parsuje XML RSO do listy znormalizowanych dokumentów."""
+    """Parsuje XML RSO do listy znormalizowanych dokumentów posortowanych od najnowszych."""
     raw_bytes = xml_bytes.encode("utf-8") if isinstance(xml_bytes, str) else xml_bytes
     root = ET.fromstring(raw_bytes)
 
@@ -246,10 +247,8 @@ def parse_rso_xml(
                 metadata={"feed_url": source_url},
             )
         )
-        if limit is not None and len(docs) >= limit:
-            break
 
-    return docs
+    return sort_latest(docs, limit=limit)
 
 
 class RsoParser:
@@ -257,6 +256,16 @@ class RsoParser:
 
     def __init__(self, fetcher: RsoResourceFetcher) -> None:
         self.fetcher = fetcher
+
+    def fetch_latest(
+        self,
+        *,
+        limit: int = 10,
+        province: str | None = None,
+        url: str = RSO_ALL_XML_URL,
+    ) -> list[RsoDocument]:
+        """Pobiera do ``limit`` najnowszych komunikatów RSO."""
+        return self.fetch_warnings(url=url, province=province, limit=limit)
 
     def fetch_warnings(
         self,

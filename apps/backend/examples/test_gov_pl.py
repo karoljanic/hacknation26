@@ -10,10 +10,8 @@ LISTING_URLS = [
     "https://www.gov.pl/web/paa/panstwowa-agencja-atomistyki",
     "https://www.gov.pl/web/infrastruktura/aktualnosci",
     "https://www.gov.pl/web/wody-polskie/komunikaty-nawigacyjne",
-    "https://www.gov.pl/web/dyplomacja/informacje-dla-podrozujacych",
     "https://www.gov.pl/web/rcb/strona-glowna-rzadowego-centrum-bezpieczenstwa",
     "https://www.gov.pl/web/mswia",
-    "https://www.gov.pl/web/infrastruktura",
     "https://www.gov.pl/web/premier",
 ]
 
@@ -48,7 +46,7 @@ def main() -> None:
         parser = GovPlParser(fetcher)
 
         if args.url:
-            docs = parser.fetch_listing(args.url, limit=args.limit)
+            docs = parser.fetch_latest(args.url, limit=args.limit)
             print(f"Wynik dla {args.url}: {len(docs)} dok.")
             for doc in docs:
                 print_doc(doc)
@@ -59,7 +57,7 @@ def main() -> None:
             print("=== STRONY LISTUJĄCE ===")
             for url in LISTING_URLS:
                 try:
-                    docs = parser.fetch_listing(url, limit=args.limit)
+                    docs = parser.fetch_latest(url, limit=args.limit)
                     total += len(docs)
                     print(f"\n[OK] {url} -> {len(docs)} dok.")
                     for doc in docs:

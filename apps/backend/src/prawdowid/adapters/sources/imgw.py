@@ -25,6 +25,7 @@ from prawdowid.adapters.sources.gov_pl import (
     content_hash,
     normalize_text,
     parse_gov_date,
+    sort_latest,
 )
 
 ImgwDataset = Literal["warningsmeteo", "warningshydro", "synop", "hydro"]
@@ -32,6 +33,7 @@ ImgwDataset = Literal["warningsmeteo", "warningshydro", "synop", "hydro"]
 IMGW_API_BASE = "https://danepubliczne.imgw.pl/api/data"
 ALLOWED_HOSTS = frozenset({"danepubliczne.imgw.pl"})
 DEFAULT_USER_AGENT = "Prawdowid/0.1 (imgw corpus ingestion)"
+_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
 ENDPOINT_URLS: dict[ImgwDataset, str] = {
     "warningsmeteo": f"{IMGW_API_BASE}/warningsmeteo",
@@ -182,7 +184,6 @@ def _decode_json_list(payload: bytes | str) -> list[dict[str, Any]]:
     data = json.loads(raw)
     if isinstance(data, list):
         return [item for item in data if isinstance(item, dict)]
-    # IMGW zwraca {"status": false, "message": "No products were found"} gdy brak ostrzeżeń.
     if isinstance(data, dict) and data.get("status") is False:
         return []
     return []
@@ -205,6 +206,14 @@ def _pick_first(item: dict[str, Any], *keys: str) -> str:
     return ""
 
 
+def _parse_expires_at(raw: str) -> datetime | None:
+    """Parsuje datę wygaśnięcia; rok >= 9000 (znacznik 'do odwołania' w IMGW) mapuje na None."""
+    dt = parse_gov_date(raw)
+    if dt is not None and dt.year >= 9000:
+        return None
+    return dt
+
+
 def parse_warnings_meteo(
     payload: bytes | str,
     *,
@@ -216,7 +225,10 @@ def parse_warnings_meteo(
     docs: list[ImgwDocument] = []
 
     for idx, item in enumerate(items, start=1):
-        event = _pick_first(item, "nazwa_zdarzenia", "zjawisko") or "Ostrzeżenie meteorologiczne"
+        event = (
+            _pick_first(item, "nazwa_zdarzenia", "zdarzenie", "zjawisko")
+            or "Ostrzeżenie meteorologiczne"
+        )
         level = _pick_first(item, "stopien")
         prob = _pick_first(item, "prawdopodobienstwo")
         valid_from = _pick_first(item, "obowiazuje_od")
@@ -226,6 +238,7 @@ def parse_warnings_meteo(
         comment = _pick_first(item, "komentarz")
         office = _pick_first(item, "biuro")
         warning_id = _pick_first(item, "id") or str(idx)
+        expires_at = _parse_expires_at(valid_to)
 
         teryts = item.get("teryt")
         teryt_list = [str(t).strip() for t in teryts if str(t).strip()] if isinstance(teryts, list) else []
@@ -233,7 +246,8 @@ def parse_warnings_meteo(
         title = f"Ostrzeżenie meteorologiczne IMGW{f' ({level} st.)' if level else ''}: {event}"
         lines = [title]
         if valid_from or valid_to:
-            lines.append(f"Okres obowiązywania: od {valid_from or '?'} do {valid_to or '?'}.")
+            valid_to_label = "do odwołania" if (valid_to and expires_at is None) else (valid_to or "?")
+            lines.append(f"Okres obowiązywania: od {valid_from or '?'} do {valid_to_label}.")
         if prob:
             lines.append(f"Prawdopodobieństwo wystąpienia: {prob}%.")
         if office:
@@ -257,7 +271,7 @@ def parse_warnings_meteo(
                 fetched_at=fetched_at,
                 dataset="warningsmeteo",
                 published_at=parse_gov_date(published_raw),
-                expires_at=parse_gov_date(valid_to),
+                expires_at=expires_at,
                 metadata={
                     "warning_id": warning_id,
                     "event": event,
@@ -266,10 +280,8 @@ def parse_warnings_meteo(
                 },
             )
         )
-        if limit is not None and len(docs) >= limit:
-            break
 
-    return docs
+    return sort_latest(docs, limit=limit)
 
 
 def parse_warnings_hydro(
@@ -283,7 +295,10 @@ def parse_warnings_hydro(
     docs: list[ImgwDocument] = []
 
     for idx, item in enumerate(items, start=1):
-        event = _pick_first(item, "zjawisko", "nazwa_zdarzenia") or "Ostrzeżenie hydrologiczne"
+        event = (
+            _pick_first(item, "zdarzenie", "zjawisko", "nazwa_zdarzenia")
+            or "Ostrzeżenie hydrologiczne"
+        )
         level = _pick_first(item, "stopien")
         number = _pick_first(item, "numer") or str(idx)
         prob = _pick_first(item, "prawdopodobienstwo")
@@ -293,6 +308,7 @@ def parse_warnings_hydro(
         course = _pick_first(item, "przebieg", "tresc")
         comment = _pick_first(item, "komentarz")
         office = _pick_first(item, "biuro")
+        expires_at = _parse_expires_at(valid_to)
 
         areas_raw = item.get("obszary")
         area_descriptions: list[str] = []
@@ -311,7 +327,8 @@ def parse_warnings_hydro(
         title = f"Ostrzeżenie hydrologiczne IMGW nr {number}{f' ({level} st.)' if level else ''}: {event}"
         lines = [title]
         if valid_from or valid_to:
-            lines.append(f"Okres obowiązywania: od {valid_from or '?'} do {valid_to or '?'}.")
+            valid_to_label = "do odwołania" if (valid_to and expires_at is None) else (valid_to or "?")
+            lines.append(f"Okres obowiązywania: od {valid_from or '?'} do {valid_to_label}.")
         if provinces:
             lines.append(f"Województwa: {', '.join(sorted(provinces))}.")
         if area_descriptions:
@@ -335,7 +352,7 @@ def parse_warnings_hydro(
                 fetched_at=fetched_at,
                 dataset="warningshydro",
                 published_at=parse_gov_date(published_raw),
-                expires_at=parse_gov_date(valid_to),
+                expires_at=expires_at,
                 metadata={
                     "number": number,
                     "event": event,
@@ -344,10 +361,8 @@ def parse_warnings_hydro(
                 },
             )
         )
-        if limit is not None and len(docs) >= limit:
-            break
 
-    return docs
+    return sort_latest(docs, limit=limit)
 
 
 def parse_synop(
@@ -355,20 +370,18 @@ def parse_synop(
     *,
     fetched_at: datetime,
     source_url: str = ENDPOINT_URLS["synop"],
-    limit: int = 15,
+    limit: int | None = 15,
     major_cities_first: bool = True,
 ) -> list[ImgwDocument]:
-    items = _decode_json_list(payload)
-    if major_cities_first:
-        items.sort(
-            key=lambda it: (
-                0 if _pick_first(it, "stacja").lower() in MAJOR_SYNOP_STATIONS else 1,
-                _pick_first(it, "stacja").lower(),
-            )
-        )
+    if limit is not None:
+        if limit < 0:
+            raise ValueError("limit nie może być ujemny")
+        if limit == 0:
+            return []
 
+    items = _decode_json_list(payload)
     docs: list[ImgwDocument] = []
-    for item in items[:limit]:
+    for item in items:
         station = _pick_first(item, "stacja")
         station_id = _pick_first(item, "id_stacji")
         if not station:
@@ -415,7 +428,20 @@ def parse_synop(
             )
         )
 
-    return docs
+    docs.sort(
+        key=lambda doc: (
+            doc.published_at is not None,
+            doc.published_at or _MIN_UTC,
+            1
+            if (
+                major_cities_first
+                and str(doc.metadata.get("station", "")).lower() in MAJOR_SYNOP_STATIONS
+            )
+            else 0,
+        ),
+        reverse=True,
+    )
+    return docs[:limit] if limit is not None else docs
 
 
 def parse_hydro(
@@ -423,27 +449,16 @@ def parse_hydro(
     *,
     fetched_at: datetime,
     source_url: str = ENDPOINT_URLS["hydro"],
-    limit: int = 15,
+    limit: int | None = 15,
 ) -> list[ImgwDocument]:
-    """Parsuje dane ze stacji hydrologicznych; na początek wysuwa przekroczenia stanów."""
+    """Parsuje dane ze stacji hydrologicznych (od najnowszych, z priorytetem przekroczeń)."""
+    if limit is not None:
+        if limit < 0:
+            raise ValueError("limit nie może być ujemny")
+        if limit == 0:
+            return []
+
     items = _decode_json_list(payload)
-
-    def _severity_key(it: dict[str, Any]) -> tuple[int, str]:
-        level = _to_float(it.get("stan_wody"))
-        alarm = _to_float(it.get("stan_alarmowy"))
-        warn = _to_float(it.get("stan_ostrzegawczy"))
-        if level is not None and alarm is not None and level >= alarm:
-            rank = 0
-        elif level is not None and warn is not None and level >= warn:
-            rank = 1
-        elif level is not None:
-            rank = 2
-        else:
-            rank = 3
-        return (rank, _pick_first(it, "stacja").lower())
-
-    items.sort(key=_severity_key)
-
     docs: list[ImgwDocument] = []
     for item in items:
         station = _pick_first(item, "stacja")
@@ -502,10 +517,21 @@ def parse_hydro(
                 },
             )
         )
-        if len(docs) >= limit:
-            break
 
-    return docs
+    severity_rank = {
+        "PRZEKROCZONY STAN ALARMOWY": 3,
+        "PRZEKROCZONY STAN OSTRZEGAWCZY": 2,
+        "w normie": 1,
+    }
+    docs.sort(
+        key=lambda doc: (
+            doc.published_at is not None,
+            doc.published_at or _MIN_UTC,
+            severity_rank.get(str(doc.metadata.get("status", "")), 0),
+        ),
+        reverse=True,
+    )
+    return docs[:limit] if limit is not None else docs
 
 
 class ImgwParser:
@@ -526,20 +552,56 @@ class ImgwParser:
             res.content, fetched_at=res.fetched_at, source_url=res.url, limit=limit
         )
 
-    def fetch_synop(self, *, limit: int = 10) -> list[ImgwDocument]:
+    def fetch_synop(self, *, limit: int | None = 10) -> list[ImgwDocument]:
         res = self.fetcher.get(ENDPOINT_URLS["synop"])
         return parse_synop(res.content, fetched_at=res.fetched_at, source_url=res.url, limit=limit)
 
-    def fetch_hydro(self, *, limit: int = 10) -> list[ImgwDocument]:
+    def fetch_hydro(self, *, limit: int | None = 10) -> list[ImgwDocument]:
         res = self.fetcher.get(ENDPOINT_URLS["hydro"])
         return parse_hydro(res.content, fetched_at=res.fetched_at, source_url=res.url, limit=limit)
+
+    def fetch_latest(
+        self,
+        *,
+        limit: int = 10,
+        dataset: ImgwDataset | None = None,
+    ) -> list[ImgwDocument]:
+        """Pobiera do ``limit`` najnowszych dokumentów IMGW (z jednego zbioru lub łącznie)."""
+        if limit < 0:
+            raise ValueError("limit nie może być ujemny")
+        if limit == 0:
+            return []
+
+        if dataset == "warningsmeteo":
+            return self.fetch_warnings_meteo(limit=limit)
+        if dataset == "warningshydro":
+            return self.fetch_warnings_hydro(limit=limit)
+        if dataset == "synop":
+            return self.fetch_synop(limit=limit)
+        if dataset == "hydro":
+            return self.fetch_hydro(limit=limit)
+
+        combined = self.fetch_all(
+            warnings_limit=limit,
+            synop_limit=limit,
+            hydro_limit=limit,
+        )
+        combined.sort(
+            key=lambda doc: (
+                doc.published_at is not None,
+                doc.published_at or _MIN_UTC,
+                1 if doc.dataset in {"warningsmeteo", "warningshydro"} else 0,
+            ),
+            reverse=True,
+        )
+        return combined[:limit]
 
     def fetch_all(
         self,
         *,
         warnings_limit: int | None = 20,
-        synop_limit: int = 10,
-        hydro_limit: int = 10,
+        synop_limit: int | None = 10,
+        hydro_limit: int | None = 10,
     ) -> list[ImgwDocument]:
         docs: list[ImgwDocument] = []
         for fn in (

@@ -1,9 +1,9 @@
-"""Wspólny parser RSS/Atom z fallbackiem HTML (CERT Polska, Policja, inne feedy).
+"""Wspólny parser RSS/Atom z paginowanym fallbackiem HTML (CERT Polska, Policja, inne feedy).
 
 Obsługuje:
 - bezpośrednie kanały RSS 2.0 i Atom (parsowane standardową biblioteką XML),
 - automatyczne wykrywanie kanału RSS na podanej stronie HTML (w tym 1 poziom w głąb dla stron /rss),
-- fallback na listę linków HTML, jeśli serwis nie wystawia RSS (np. moje.cert.pl/komunikaty/),
+- fallback na paginowaną listę linków HTML, jeśli serwis nie wystawia RSS (np. moje.cert.pl/komunikaty/),
 - dociąganie pełnej treści artykułu z sanityzacją HTML (ochrona przed prompt injection).
 """
 
@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import os
+import re
 import socket
 import ssl
 import time
 from typing import Protocol
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qs, urljoin, urlsplit, urlunsplit
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -28,12 +29,14 @@ from prawdowid.adapters.sources.gov_pl import (
     normalize_text,
     parse_gov_date,
     sanitize_soup,
+    sort_latest,
 )
 from prawdowid.adapters.sources.web import _is_public_address
 
 DEFAULT_USER_AGENT = "Prawdowid/0.1 (rss corpus ingestion)"
 _CHROME_TAGS = ("nav", "header", "footer", "aside", "form")
 _SKIP_LINK_FRAGMENTS = ("kontakt", "bip", "polityka-prywatnosci", "deklaracja", "szukaj")
+_PATH_PAGE_RE = re.compile(r"/(?:page|strona)/(\d+)/?$", re.IGNORECASE)
 
 
 class RssResourceFetcher(Protocol):
@@ -380,7 +383,7 @@ def extract_html_listing_links(
     listing_url: str,
     *,
     encoding: str | None = None,
-    limit: int = 10,
+    limit: int | None = 10,
 ) -> list[str]:
     """Fallback HTML: wyciąga linki do najnowszych wpisów w obrębie tej samej domeny."""
     soup = sanitize_soup(html, encoding=encoding)
@@ -419,14 +422,80 @@ def extract_html_listing_links(
 
         seen.add(full)
         links.append(full)
-        if len(links) >= limit:
+        if limit is not None and len(links) >= limit:
             break
 
     return links
 
 
+def _html_page_number(url: str) -> int:
+    parts = urlsplit(url)
+    qs = parse_qs(parts.query)
+    for key in ("page", "strona", "p"):
+        if key in qs and qs[key]:
+            try:
+                return max(1, int(qs[key][0]))
+            except ValueError:
+                pass
+    match = _PATH_PAGE_RE.search(parts.path)
+    if match:
+        return max(1, int(match.group(1)))
+    return 1
+
+
+def extract_next_page_url(
+    html: bytes | str,
+    current_url: str,
+    *,
+    encoding: str | None = None,
+) -> str | None:
+    """Wykrywa link do kolejnej strony paginacji na stronach HTML (rel=next, ?page=N, /page/N)."""
+    soup = sanitize_soup(html, encoding=encoding)
+    base_domain = _domain(current_url)
+    current_canonical = _canonical_url(current_url)
+    current_page = _html_page_number(current_url)
+    target_page = current_page + 1
+
+    def _valid(href: str) -> str | None:
+        full = _canonical_url(urljoin(current_url, href.strip()))
+        if _domain(full) != base_domain or full == current_canonical:
+            return None
+        return full
+
+    rel_next = soup.find(
+        "a",
+        rel=lambda r: bool(
+            r and "next" in [x.lower() for x in (r if isinstance(r, list) else [r])]
+        ),
+    )
+    if rel_next and rel_next.get("href"):
+        candidate = _valid(str(rel_next["href"]))
+        if candidate:
+            return candidate
+
+    for anchor in soup.find_all("a", href=True):
+        href = str(anchor["href"]).strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        candidate = _valid(href)
+        if not candidate:
+            continue
+        cand_page = _html_page_number(candidate)
+        if cand_page == target_page:
+            return candidate
+        label = normalize_text(anchor.get_text(" ", strip=True)).lower()
+        aria = str(anchor.get("aria-label") or "").lower()
+        if (
+            any(tok in label or tok in aria for tok in ("następna", "nastepna", "next", "»"))
+            and cand_page > current_page
+        ):
+            return candidate
+
+    return None
+
+
 class RssParser:
-    """Uniwersalny parser RSS/Atom z automatycznym wykrywaniem feedu i fallbackiem HTML."""
+    """Uniwersalny parser RSS/Atom z automatycznym wykrywaniem feedu i paginacją fallbacku HTML."""
 
     def __init__(
         self,
@@ -435,14 +504,27 @@ class RssParser:
         fetch_full_article: bool = True,
         min_summary_length: int = 280,
         min_text_length: int = 40,
+        request_delay: float = 0.0,
     ) -> None:
         self.fetcher = fetcher
         self.fetch_full_article = fetch_full_article
         self.min_summary_length = min_summary_length
         self.min_text_length = min_text_length
+        self.request_delay = max(0.0, request_delay)
 
-    def fetch_source(self, url: str, *, limit: int = 10) -> list[RssDocument]:
-        """Przyjmuje URL feedu RSS/Atom ALBO stronę z aktualnościami (wykrywa RSS lub robi fallback HTML)."""
+    def fetch_latest(
+        self,
+        url: str,
+        *,
+        limit: int = 10,
+        max_pages: int = 10,
+    ) -> list[RssDocument]:
+        """Pobiera do ``limit`` najnowszych dokumentów z RSS/Atom albo z paginowanego listingu HTML."""
+        if limit < 0:
+            raise ValueError("limit nie może być ujemny")
+        if limit == 0:
+            return []
+
         res = self.fetcher.get(url)
         if _looks_like_xml_feed(res.content, res.content_type):
             return self._from_feed_resource(res, limit=limit)
@@ -467,38 +549,23 @@ class RssParser:
             except Exception:
                 continue
 
-        # Fallback: lista linków bezpośrednio ze strony HTML (np. moje.cert.pl/komunikaty/).
-        article_links = extract_html_listing_links(
-            res.content, res.url, encoding=res.encoding, limit=limit
-        )
-        docs: list[RssDocument] = []
-        for article_url in article_links:
-            try:
-                art = self.fetcher.get(article_url)
-                title, text, published_at = extract_article_html(art.content, encoding=art.encoding)
-                if len(text) < self.min_text_length:
-                    continue
-                docs.append(
-                    RssDocument(
-                        url=art.url,
-                        domain=_domain(art.url),
-                        title=title or art.url,
-                        text=text,
-                        content_hash=content_hash(text),
-                        fetched_at=art.fetched_at,
-                        published_at=published_at,
-                        source_feed_url=res.url,
-                    )
-                )
-            except Exception:
-                continue
-        return docs
+        return self._from_html_listing(res, limit=limit, max_pages=max_pages)
+
+    def fetch_source(self, url: str, *, limit: int = 10, max_pages: int = 10) -> list[RssDocument]:
+        """Alias zachowany dla kompatybilności wstecznej."""
+        return self.fetch_latest(url, limit=limit, max_pages=max_pages)
 
     def _from_feed_resource(self, feed_res: RawResource, *, limit: int) -> list[RssDocument]:
-        items = parse_feed_xml(feed_res.content, base_url=feed_res.url)[:limit]
+        items = sort_latest(parse_feed_xml(feed_res.content, base_url=feed_res.url))
         docs: list[RssDocument] = []
+        seen_urls: set[str] = set()
 
         for item in items:
+            canonical = _canonical_url(item.url)
+            if canonical in seen_urls:
+                continue
+            seen_urls.add(canonical)
+
             text = item.summary
             title = item.title
             published_at = item.published_at
@@ -506,6 +573,8 @@ class RssParser:
             fetched_at = feed_res.fetched_at
 
             if self.fetch_full_article and len(text) < self.min_summary_length:
+                if self.request_delay > 0:
+                    time.sleep(self.request_delay)
                 try:
                     art = self.fetcher.get(item.url)
                     art_title, art_text, art_pub = extract_article_html(
@@ -538,5 +607,82 @@ class RssParser:
                     source_feed_url=feed_res.url,
                 )
             )
+            if len(docs) >= limit:
+                break
 
-        return docs
+        return sort_latest(docs, limit=limit)
+
+    def _from_html_listing(
+        self,
+        first_res: RawResource,
+        *,
+        limit: int,
+        max_pages: int,
+    ) -> list[RssDocument]:
+        docs: list[RssDocument] = []
+        seen_articles: set[str] = set()
+        seen_pages: set[str] = set()
+        current_res: RawResource | None = first_res
+
+        for _ in range(max(1, max_pages)):
+            if current_res is None:
+                break
+            canonical_page = _canonical_url(current_res.url)
+            if canonical_page in seen_pages:
+                break
+            seen_pages.add(canonical_page)
+
+            links = extract_html_listing_links(
+                current_res.content,
+                current_res.url,
+                encoding=current_res.encoding,
+                limit=None,
+            )
+            new_links = [link for link in links if link not in seen_articles]
+            if not new_links:
+                break
+
+            for article_url in new_links:
+                seen_articles.add(article_url)
+                if self.request_delay > 0:
+                    time.sleep(self.request_delay)
+                try:
+                    art = self.fetcher.get(article_url)
+                    title, text, published_at = extract_article_html(
+                        art.content, encoding=art.encoding
+                    )
+                    if len(text) < self.min_text_length:
+                        continue
+                    docs.append(
+                        RssDocument(
+                            url=art.url,
+                            domain=_domain(art.url),
+                            title=title or art.url,
+                            text=text,
+                            content_hash=content_hash(text),
+                            fetched_at=art.fetched_at,
+                            published_at=published_at,
+                            source_feed_url=first_res.url,
+                        )
+                    )
+                    if len(docs) >= limit:
+                        break
+                except Exception:
+                    continue
+
+            if len(docs) >= limit:
+                break
+
+            next_url = extract_next_page_url(
+                current_res.content,
+                current_res.url,
+                encoding=current_res.encoding,
+            )
+            if next_url is None:
+                break
+            try:
+                current_res = self.fetcher.get(next_url)
+            except Exception:
+                break
+
+        return sort_latest(docs, limit=limit)
