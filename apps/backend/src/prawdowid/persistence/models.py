@@ -48,6 +48,7 @@ from prawdowid.domain.enums import (
     DocumentRelation,
     EvidenceRelation,
     IngestionStatus,
+    JobStatus,
     RunStatus,
     SourceKind,
     Strength,
@@ -217,8 +218,43 @@ class IngestionRun(Base):
     counts: Mapped[dict[str, Any]] = json_object()
     errors: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     params: Mapped[dict[str, Any]] = json_object()  # collector parameters used
+    # Worker task / CLI command that performed this run.
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("job_run.id", ondelete="SET NULL"), index=True
+    )
 
     source: Mapped[Source] = relationship()
+
+
+class JobRun(Base):
+    """One execution of a worker task or CLI command: the operational log.
+
+    Written for every job, including ones that crash before doing any work.
+    Domain-level detail stays in the domain tables (``ingestion_run``,
+    ``verification_run``), which point back here via ``job_id``.
+    """
+
+    __tablename__ = "job_run"
+    __table_args__ = (Index("ix_job_run_name_started", "name", text("started_at DESC")),)
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    name: Mapped[str] = mapped_column(String(100))  # e.g. "ingestion.ingest_source", "cli.embed"
+    trigger: Mapped[str] = mapped_column(String(16))  # "celery" | "cli"
+    task_id: Mapped[str | None] = mapped_column(String(64), index=True)  # Celery task id
+    worker: Mapped[str | None] = mapped_column(String(200))  # Celery hostname / host
+    status: Mapped[JobStatus] = mapped_column(
+        str_enum(JobStatus, "job_status"), server_default=JobStatus.RUNNING.value, index=True
+    )
+    started_at: Mapped[datetime] = created_at()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int | None] = mapped_column()
+    params: Mapped[dict[str, Any]] = json_object()
+    # Summary returned by the job: counts of downloaded/new/skipped items, etc.
+    result: Mapped[dict[str, Any]] = json_object()
+    # Problems reported by a finished job (failed documents, provider errors...).
+    problems: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    error: Mapped[str | None] = mapped_column(Text)  # exception that ended the job
+    traceback: Mapped[str | None] = mapped_column(Text)
 
 
 class DocumentLink(Base):

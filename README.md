@@ -520,6 +520,23 @@ celery -A prawdowid.workers.celery_app call ingestion.ingest_source --args='["go
 celery -A prawdowid.workers.celery_app call embedding.embed_pending --args='["passage", 200]'
 ```
 
+**Dziennik zadań.** Każde wykonanie zadania Celery i każde polecenie CLI
+zmieniające dane (`sync-catalog`, `ingest`, `embed`) zapisuje wiersz w tabeli
+`job_run`: nazwę, wyzwalacz (`celery`/`cli`), identyfikator zadania Celery,
+workera, parametry, czas trwania, podsumowanie (pobrane / nowe / niezmienione /
+pominięte / błędne dokumenty, fragmenty, embeddingi), zgłoszone problemy oraz —
+przy awarii — wyjątek z tracebackiem. Status: `ok`, `problems` (zakończone, ale
+z błędami lub częściowo) albo `failed`. Wiersz powstaje przed rozpoczęciem pracy,
+więc ślad zostaje także po awarii na starcie; niedostępność bazy nie przerywa
+samego zadania. Szczegóły pobierania źródła są w `ingestion_run`, powiązanym
+przez `job_id`; przebieg zgłoszeń obywateli — w `verification_run`.
+
+```bash
+python -m prawdowid.ingestion jobs                      # ostatnie zadania
+python -m prawdowid.ingestion jobs --problems --since-hours 24
+python -m prawdowid.ingestion jobs --name embedding.
+```
+
 **Dodanie źródła:** adapter w `adapters/sources` → kolektor w
 `ingestion/collectors/` zwracający `CorpusDocument` (lub `Skipped` dla
 pojedynczego nieużytecznego elementu) → rejestracja w

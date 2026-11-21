@@ -113,6 +113,15 @@ class IngestionStatus(StrEnum):
     SKIPPED = "skipped"  # not attempted, e.g. missing API key
 
 
+class JobStatus(StrEnum):
+    """Outcome of one worker task / CLI command (see ``job_run``)."""
+
+    RUNNING = "running"
+    OK = "ok"
+    PROBLEMS = "problems"  # finished, but reported errors / skips / partial results
+    FAILED = "failed"  # raised an exception
+
+
 class CaseState(StrEnum):
     # The system must distinguish recommending a hand-off from doing it.
     RECOMMENDED = "recommended"

@@ -79,13 +79,25 @@ class IngestionService:
         self.open_collector = open_collector
         self.min_text_chars = min_text_chars
 
-    def ingest_all(self, *, overrides: Mapping[str, Any] | None = None) -> list[IngestionResult]:
-        return [self.ingest_source(entry.slug, overrides=overrides) for entry in self.catalog.source]
+    def ingest_all(
+        self, *, overrides: Mapping[str, Any] | None = None, job_id: uuid.UUID | None = None
+    ) -> list[IngestionResult]:
+        return [
+            self.ingest_source(entry.slug, overrides=overrides, job_id=job_id)
+            for entry in self.catalog.source
+        ]
 
-    def ingest_source(self, slug: str, *, overrides: Mapping[str, Any] | None = None) -> IngestionResult:
+    def ingest_source(
+        self,
+        slug: str,
+        *,
+        overrides: Mapping[str, Any] | None = None,
+        job_id: uuid.UUID | None = None,
+    ) -> IngestionResult:
+        """``job_id`` links the ``ingestion_run`` to the job_run that performed it."""
         entry = self.catalog.get(slug)
         params = {**entry.collect.params, **(overrides or {})}
-        source_id, run_id = self._open_run(entry, params)
+        source_id, run_id = self._open_run(entry, params, job_id)
         counts = {"seen": 0, "new": 0, "unchanged": 0, "skipped": 0, "failed": 0, "passages": 0}
         errors: list[str] = []
 
@@ -131,14 +143,18 @@ class IngestionService:
 
     # -- storage ------------------------------------------------------------ #
 
-    def _open_run(self, entry: SourceEntry, params: Mapping[str, Any]) -> tuple[uuid.UUID, uuid.UUID]:
+    def _open_run(
+        self, entry: SourceEntry, params: Mapping[str, Any], job_id: uuid.UUID | None
+    ) -> tuple[uuid.UUID, uuid.UUID]:
         with self.session_factory() as session, session.begin():
             source = session.scalars(select(Source).where(Source.slug == entry.slug)).first()
             if source is None:
                 raise LookupError(f"Source '{entry.slug}' is not in the database; run sync-catalog first")
             if not source.active:
                 raise LookupError(f"Source '{entry.slug}' is inactive (excluded from the catalogue)")
-            run = IngestionRun(source_id=source.id, status=IngestionStatus.RUNNING, params=dict(params))
+            run = IngestionRun(
+                source_id=source.id, status=IngestionStatus.RUNNING, params=dict(params), job_id=job_id
+            )
             session.add(run)
             session.flush()
             return source.id, run.id

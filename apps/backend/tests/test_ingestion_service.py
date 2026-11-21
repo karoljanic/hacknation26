@@ -102,10 +102,13 @@ def test_new_unchanged_and_changed_versions(isolated_sessions) -> None:
         assert stored.meta == {"k": "v"} and stored.published_at == NOW
         passages = session.scalars(select(Passage).where(Passage.document_id == stored.id)).all()
         assert passages and all(p.embedding_model is None for p in passages)
-        runs = session.scalars(select(IngestionRun).order_by(IngestionRun.started_at)).all()
-        ours = [r for r in runs if r.id in {first.run_id, second.run_id, third.run_id}]
-        assert len(ours) == 3 and all(r.finished_at is not None for r in ours)
-        assert ours[-1].params == {"batch": "changed"}
+        # Look runs up by id: inside the test's single transaction now() is
+        # constant, so started_at cannot order them.
+        runs = {r.id: r for r in session.scalars(select(IngestionRun).where(
+            IngestionRun.id.in_([first.run_id, second.run_id, third.run_id])))}
+        assert len(runs) == 3 and all(r.finished_at is not None for r in runs.values())
+        assert runs[third.run_id].params == {"batch": "changed"}
+        assert runs[first.run_id].params == {"batch": "default"}
 
 
 def test_skips_and_rule_violations_are_counted_not_stored(isolated_sessions) -> None:
