@@ -91,7 +91,9 @@ def test_parser_fetch_listing_returns_normalized_documents() -> None:
             ),
             "https://www.gov.pl/web/gis/ostrzezenie-produkt-2": RawResource(
                 url="https://www.gov.pl/web/gis/ostrzezenie-produkt-2",
-                content=ARTICLE_HTML.encode(),
+                # Different text: fetch_listing drops articles whose content
+                # hash it has already seen (see the dedup test below).
+                content=ARTICLE_HTML.replace("partii produktu", "partii innego produktu").encode(),
                 content_type="text/html",
                 fetched_at=now,
             ),
@@ -104,3 +106,31 @@ def test_parser_fetch_listing_returns_normalized_documents() -> None:
     assert len(docs) == 2
     assert docs[0].department == "gis"
     assert len(docs[0].content_hash) == 64
+    assert docs[0].content_hash != docs[1].content_hash
+
+
+def test_parser_fetch_listing_skips_same_article_under_another_url() -> None:
+    now = datetime(2026, 11, 21, 12, 0, tzinfo=timezone.utc)
+
+    def resource(url: str, html: str) -> RawResource:
+        return RawResource(url=url, content=html.encode(), content_type="text/html", fetched_at=now)
+
+    fetcher = FakeFetcher(
+        {
+            "https://www.gov.pl/web/gis/ostrzezenia": resource(
+                "https://www.gov.pl/web/gis/ostrzezenia", LISTING_HTML
+            ),
+            # Identical article reachable under two URLs -> stored once.
+            "https://www.gov.pl/web/gis/ostrzezenie-produkt-1": resource(
+                "https://www.gov.pl/web/gis/ostrzezenie-produkt-1", ARTICLE_HTML
+            ),
+            "https://www.gov.pl/web/gis/ostrzezenie-produkt-2": resource(
+                "https://www.gov.pl/web/gis/ostrzezenie-produkt-2", ARTICLE_HTML
+            ),
+        }
+    )
+
+    docs = GovPlParser(fetcher, include_pdf_attachments=False).fetch_listing(
+        "https://www.gov.pl/web/gis/ostrzezenia", limit=5
+    )
+    assert [d.url for d in docs] == ["https://www.gov.pl/web/gis/ostrzezenie-produkt-1"]
