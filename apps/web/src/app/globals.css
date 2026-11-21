@@ -18,6 +18,7 @@
   --color-error-border: #b3261e;
   --color-warning-bg: #fff6e0;
   --color-warning-border: #a86500;
+  --color-info-bg: #e8f0fa;
 
   --font: "Lato", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --radius: 4px;
@@ -256,6 +257,111 @@ textarea.input {
   min-height: 8rem;
 }
 
+.field__error {
+  margin: 0;
+  font-weight: 700;
+  color: var(--color-error-border);
+}
+
+/* Input-type choice: radio buttons styled as selectable tiles. */
+.choice {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.choice legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+}
+
+.choice__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.5rem;
+}
+
+.choice__option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0.75rem 0.75rem 2.25rem;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  background: var(--color-bg);
+}
+
+.choice__option:hover {
+  border-color: var(--color-primary);
+}
+
+.choice__option:has(input:checked) {
+  border-color: var(--color-primary);
+  background: var(--color-info-bg);
+}
+
+.choice__option:has(input:focus-visible) {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.choice__option input {
+  position: absolute;
+  left: 0.75rem;
+  top: 0.95rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
+.choice__label {
+  font-weight: 700;
+}
+
+.choice__hint {
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+  line-height: 1.3;
+}
+
+.file-input {
+  font: inherit;
+  max-width: 100%;
+}
+
+.file-input::file-selector-button {
+  font: inherit;
+  font-weight: 700;
+  color: var(--color-primary);
+  background: var(--color-bg);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem;
+  margin-right: 0.75rem;
+  cursor: pointer;
+}
+
+.file-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+
+.file-summary__preview {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  flex: none;
+}
+
 .button {
   justify-self: start;
   font: inherit;
@@ -303,6 +409,11 @@ textarea.input {
 
 .alert__title {
   font-weight: 700;
+}
+
+.alert--info {
+  background: var(--color-info-bg);
+  border-color: var(--color-primary);
 }
 
 .alert--warning {
