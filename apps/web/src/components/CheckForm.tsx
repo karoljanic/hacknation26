@@ -5,6 +5,25 @@ import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } 
 // Mirrors the backend's POST /check contract (apps/backend/src/prawdowid/api/check.py).
 type InputType = "text" | "question" | "url" | "image" | "video";
 
+type ClaimKind = "factual_claim" | "verification_question" | "opinion";
+type Verdict = "confirmed" | "false" | "misleading" | "insufficient_evidence" | "unverifiable";
+type Strength = "strong" | "moderate" | "weak";
+type RunStatus = "pending" | "running" | "ok" | "tech_failure" | "needs_clarification" | "out_of_scope";
+
+type Source = { title: string; url: string; publisher: string; quote: string | null };
+
+type Claim = {
+  text: string;
+  kind: ClaimKind;
+  verdict: Verdict;
+  strength: Strength;
+  explanation: string;
+  limitations: string | null;
+  sources: Source[];
+};
+
+type CheckResponse = { run_id: string; status: RunStatus; message: string | null; claims: Claim[] };
+
 const MAX_FILE_BYTES = 12_000_000;
 
 const ACCEPT: Record<"image" | "video", string[]> = {
@@ -20,12 +39,39 @@ const OPTIONS: { value: InputType; label: string; hint: string }[] = [
   { value: "video", label: "Wideo", hint: "nagranie wideo" },
 ];
 
-type Claim = { text: string; verdict: string; explanation: string };
+const VERDICT_LABEL: Record<Verdict, string> = {
+  confirmed: "Potwierdzone",
+  false: "Fałszywe",
+  misleading: "Wprowadzające w błąd",
+  insufficient_evidence: "Brak wystarczających dowodów",
+  unverifiable: "Nie podlega weryfikacji",
+};
+
+const VERDICT_STYLE: Record<Verdict, string> = {
+  confirmed: "verdict--confirmed",
+  false: "verdict--false",
+  misleading: "verdict--misleading",
+  insufficient_evidence: "verdict--unknown",
+  unverifiable: "verdict--unknown",
+};
+
+const STRENGTH_LABEL: Record<Strength, string> = {
+  strong: "Silna podstawa",
+  moderate: "Umiarkowana podstawa",
+  weak: "Słaba podstawa",
+};
+
+const CLAIM_KIND_LABEL: Record<ClaimKind, string> = {
+  factual_claim: "Twierdzenie",
+  verification_question: "Pytanie",
+  opinion: "Opinia",
+};
 
 type State =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "not-implemented" }
+  | { kind: "needs-clarification"; message: string | null }
+  | { kind: "busy"; message: string; retryAfter: number | null }
   | { kind: "invalid"; message: string }
   | { kind: "error"; message: string }
   | { kind: "done"; message: string | null; claims: Claim[] };
@@ -127,27 +173,43 @@ export function CheckForm() {
     setState({ kind: "loading" });
     try {
       const response = await fetch("/api/check", { method: "POST", body });
-      const payload = (await response.json().catch(() => ({}))) as {
-        detail?: unknown;
-        message?: string | null;
-        claims?: Claim[];
-      };
+      const payload = (await response.json().catch(() => ({}))) as Partial<CheckResponse> & { detail?: unknown };
       const detail = typeof payload.detail === "string" ? payload.detail : null;
 
-      // Sent and accepted: clear every type's fields. On a validation or
-      // technical error they stay, so the request can be corrected or resent.
-      if (response.ok || response.status === 501) {
-        setDrafts(emptyDrafts());
+      if (!response.ok) {
+        if (response.status === 429 || response.status === 503) {
+          const retryAfter = Number(response.headers.get("retry-after"));
+          setState({
+            kind: "busy",
+            message: detail ?? "Zbyt wiele zgłoszeń. Spróbuj ponownie za chwilę.",
+            retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null,
+          });
+        } else if ([413, 415, 422].includes(response.status)) {
+          setState({ kind: "invalid", message: detail ?? "Sprawdź, czy wszystkie pola są poprawnie wypełnione." });
+        } else {
+          setState({ kind: "error", message: detail ?? "Usługa jest chwilowo niedostępna." });
+        }
+        return;
       }
 
-      if (response.ok) {
-        setState({ kind: "done", message: payload.message ?? null, claims: payload.claims ?? [] });
-      } else if (response.status === 501) {
-        setState({ kind: "not-implemented" });
-      } else if ([413, 415, 422].includes(response.status)) {
-        setState({ kind: "invalid", message: detail ?? "Sprawdź, czy wszystkie pola są poprawnie wypełnione." });
-      } else {
-        setState({ kind: "error", message: detail ?? "Usługa jest chwilowo niedostępna." });
+      // Accepted: clear every type's fields so a new check starts fresh. On
+      // a validation or technical error they stay, so the request can be
+      // corrected or resent without retyping it.
+      setDrafts(emptyDrafts());
+
+      switch (payload.status) {
+        case "ok":
+          setState({ kind: "done", message: payload.message ?? null, claims: payload.claims ?? [] });
+          break;
+        case "needs_clarification":
+          setState({ kind: "needs-clarification", message: payload.message ?? null });
+          break;
+        case "tech_failure":
+        default:
+          setState({
+            kind: "error",
+            message: payload.message ?? "Nie udało się sprawdzić zgłoszenia z powodu błędu technicznego.",
+          });
       }
     } catch {
       setState({ kind: "error", message: "Nie można połączyć się z serwerem strony." });
@@ -169,15 +231,6 @@ export function CheckForm() {
 
   return (
     <>
-      <div className="alert alert--warning" role="note">
-        <p className="alert__title">Wersja tymczasowa</p>
-        <p>
-          Sprawdzanie informacji nie jest jeszcze dostępne. Formularz przesyła zgłoszenie do
-          usługi, która na razie tylko sprawdza jego poprawność i odpowiada, że ta funkcja nie jest
-          gotowa. Zgłoszenia nie są zapisywane.
-        </p>
-      </div>
-
       <form className="form" onSubmit={onSubmit}>
         <fieldset className="choice">
           <legend className="field__label">Co chcesz sprawdzić?</legend>
@@ -274,8 +327,9 @@ export function CheckForm() {
         </div>
 
         <button type="submit" className="button" disabled={state.kind === "loading"}>
-          {state.kind === "loading" ? "Wysyłanie…" : "Sprawdź"}
+          {state.kind === "loading" ? "Sprawdzanie…" : "Sprawdź"}
         </button>
+        {state.kind === "loading" && <SearchProgress />}
       </form>
 
       <div aria-live="polite" className="result-region">
@@ -285,15 +339,65 @@ export function CheckForm() {
   );
 }
 
+// Timed approximation of the pipeline stages: the API reports no progress, so
+// this only paces the wait and never claims a stage finished on the server.
+const SEARCH_STAGES = [
+  "Wyodrębniam twierdzenia do sprawdzenia",
+  "Przeszukuję bazy fact-checkerów",
+  "Szukam w analizach dezinformacji",
+  "Przeglądam źródła rządowe",
+  "Porównuję dowody z twierdzeniami",
+  "Przygotowuję odpowiedź ze źródłami",
+];
+const STAGE_INTERVAL_MS = 3500;
+
+function SearchProgress() {
+  const [stage, setStage] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(
+      () => setStage((current) => Math.min(current + 1, SEARCH_STAGES.length - 1)),
+      STAGE_INTERVAL_MS,
+    );
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="search-progress" role="status">
+      <span className="sr-only">Sprawdzanie może potrwać kilkadziesiąt sekund.</span>
+      <svg className="search-progress__art" viewBox="0 0 120 90" aria-hidden="true">
+        <rect x="14" y="8" width="72" height="74" rx="6" className="search-progress__page" />
+        <rect x="24" y="22" width="46" height="5" rx="2.5" className="search-progress__line search-progress__line--1" />
+        <rect x="24" y="36" width="52" height="5" rx="2.5" className="search-progress__line search-progress__line--2" />
+        <rect x="24" y="50" width="40" height="5" rx="2.5" className="search-progress__line search-progress__line--3" />
+        <rect x="24" y="64" width="48" height="5" rx="2.5" className="search-progress__line search-progress__line--4" />
+        <g className="search-progress__lens">
+          <circle cx="0" cy="0" r="14" className="search-progress__glass" />
+          <line x1="10" y1="10" x2="24" y2="24" className="search-progress__handle" />
+        </g>
+      </svg>
+      <ol className="search-progress__stages" aria-hidden="true">
+        {SEARCH_STAGES.map((label, index) => (
+          <li
+            key={label}
+            className={
+              index < stage
+                ? "search-progress__stage search-progress__stage--done"
+                : index === stage
+                  ? "search-progress__stage search-progress__stage--active"
+                  : "search-progress__stage"
+            }
+          >
+            {label}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function Result({ state }: { state: State }) {
   switch (state.kind) {
-    case "not-implemented":
-      return (
-        <div className="alert alert--info">
-          <p className="alert__title">Zgłoszenie jest poprawne</p>
-          <p>Usługa przyjęła dane, ale samo sprawdzanie nie jest jeszcze dostępne.</p>
-        </div>
-      );
     case "invalid":
       return (
         <div className="alert alert--error">
@@ -301,26 +405,88 @@ function Result({ state }: { state: State }) {
           <p>{state.message}</p>
         </div>
       );
+    case "busy":
+      return (
+        <div className="alert alert--warning">
+          <p className="alert__title">Limit zgłoszeń</p>
+          <p>{state.message}</p>
+          {state.retryAfter !== null && <p>Spróbuj ponownie za około {state.retryAfter} s.</p>}
+        </div>
+      );
+    case "needs-clarification":
+      return (
+        <div className="alert alert--info">
+          <p className="alert__title">Doprecyzuj zgłoszenie</p>
+          <p>
+            {state.message ??
+              "Nie udało się odczytać treści do sprawdzenia. Opisz dokładniej, co chcesz zweryfikować."}
+          </p>
+        </div>
+      );
     case "error":
       return (
         <div className="alert alert--error">
           <p className="alert__title">Błąd techniczny</p>
-          <p>{state.message} Spróbuj ponownie później.</p>
+          <p>{state.message ?? "Usługa jest chwilowo niedostępna. Spróbuj ponownie później."}</p>
         </div>
       );
     case "done":
+      if (state.claims.length === 0) {
+        return (
+          <div className="alert alert--info">
+            <p className="alert__title">Brak twierdzeń do sprawdzenia</p>
+            <p>{state.message ?? "Nie znaleziono w zgłoszeniu żadnej tezy wymagającej weryfikacji."}</p>
+          </div>
+        );
+      }
       return (
-        <div className="alert alert--success">
-          <p className="alert__title">Wynik</p>
-          {state.message && <p>{state.message}</p>}
-          {state.claims.map((claim) => (
-            <p key={claim.text}>
-              <strong>{claim.text}</strong> – {claim.verdict}. {claim.explanation}
-            </p>
+        <div className="results">
+          {state.message && (
+            <div className="alert alert--info">
+              <p>{state.message}</p>
+            </div>
+          )}
+          {state.claims.map((claim, index) => (
+            <ClaimResult key={`${claim.text}-${index}`} claim={claim} />
           ))}
         </div>
       );
     default:
       return null;
   }
+}
+
+function ClaimResult({ claim }: { claim: Claim }) {
+  return (
+    <article className="claim-result">
+      <p className="claim-result__kind">{CLAIM_KIND_LABEL[claim.kind]}</p>
+      <h3 className="claim-result__text">{claim.text}</h3>
+      <div className="claim-result__badges">
+        <span className={`verdict ${VERDICT_STYLE[claim.verdict]}`}>{VERDICT_LABEL[claim.verdict]}</span>
+        <span className="strength">{STRENGTH_LABEL[claim.strength]}</span>
+      </div>
+      <p className="claim-result__explanation">{claim.explanation}</p>
+      {claim.limitations && (
+        <p className="claim-result__limitations">
+          <strong>Ograniczenia:</strong> {claim.limitations}
+        </p>
+      )}
+      {claim.sources.length > 0 && (
+        <div className="sources">
+          <p className="sources__title">Źródła</p>
+          <ul className="sources__list">
+            {claim.sources.map((source, index) => (
+              <li key={`${source.url}-${index}`} className="source">
+                <a href={source.url} target="_blank" rel="noreferrer noopener" className="source__title">
+                  {source.title}
+                </a>
+                <span className="source__publisher"> – {source.publisher}</span>
+                {source.quote && <blockquote className="source__quote">„{source.quote}”</blockquote>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </article>
+  );
 }

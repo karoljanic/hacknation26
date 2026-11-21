@@ -16,9 +16,15 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
+    // Rate limiting is per client: pass on the address a reverse proxy in
+    // front of this app recorded (the API honours it only when configured to).
+    const headers: Record<string, string> = { "content-type": contentType };
+    const forwardedFor = request.headers.get("x-forwarded-for");
+    if (forwardedFor) headers["x-forwarded-for"] = forwardedFor;
+
     const upstream = await fetch(`${API_URL}/check`, {
       method: "POST",
-      headers: { "content-type": contentType },
+      headers,
       body: request.body,
       // Required by Node's fetch to send a streamed body.
       duplex: "half",
@@ -26,10 +32,13 @@ export async function POST(request: Request): Promise<Response> {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     } as RequestInit & { duplex: "half" });
 
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
-    });
+    const responseHeaders: Record<string, string> = {
+      "content-type": upstream.headers.get("content-type") ?? "application/json",
+    };
+    const retryAfter = upstream.headers.get("retry-after");
+    if (retryAfter) responseHeaders["retry-after"] = retryAfter;
+
+    return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch {
     return Response.json({ detail: "Nie można połączyć się z usługą sprawdzania." }, { status: 502 });
   }

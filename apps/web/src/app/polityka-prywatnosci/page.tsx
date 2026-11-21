@@ -31,7 +31,7 @@ export default function PrivacyPolicy() {
         <div className="alert alert--warning" role="note">
           <p className="alert__title">Szablon dokumentu</p>
           <p>
-            To robocza wersja polityki prywatności prototypu. Pola oznaczone [w nawiasach] wymagają
+            To robocza wersja polityki prywatności. Pola oznaczone [w nawiasach] wymagają
             uzupełnienia, a całość – weryfikacji prawnej przed publikacją.
           </p>
         </div>

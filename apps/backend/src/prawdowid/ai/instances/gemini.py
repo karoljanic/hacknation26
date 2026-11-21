@@ -7,16 +7,24 @@ from prawdowid.ai.adapters.media import Media
 
 
 class GeminiAdapter:
-    def __init__(self, client: genai.Client, model: str) -> None:
+    def __init__(self, client: genai.Client, model: str, *, thinking_level: str | None = None) -> None:
+        """``thinking_level`` (e.g. ``LOW``) caps reasoning effort to cut latency on Gemini 3 models."""
         self.client = client
         self.model = model
+        self.thinking_level = thinking_level
+
+    def _thinking(self) -> types.ThinkingConfig | None:
+        if not self.thinking_level:
+            return None
+        return types.ThinkingConfig(thinking_level=self.thinking_level)
 
     def generate(self, prompt: str, *, search: bool = False) -> GenerationResult:
         if not prompt.strip():
             raise ValueError("Prompt must not be empty")
 
         config = types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())] if search else None
+            tools=[types.Tool(google_search=types.GoogleSearch())] if search else None,
+            thinking_config=self._thinking(),
         )
         response = self.client.models.generate_content(
             model=self.model,
@@ -63,6 +71,7 @@ class GeminiAdapter:
                 system_instruction=instructions,
                 response_mime_type="application/json",
                 response_json_schema=schema.model_json_schema(),
+                thinking_config=self._thinking(),
             ),
         )
         text = response.text

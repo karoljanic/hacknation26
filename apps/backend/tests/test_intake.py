@@ -170,3 +170,36 @@ def test_no_claims_asks_for_clarification(cleanup: list[uuid.UUID]) -> None:
     result = make_intake(FakeLLM([])).submit_text("Dzień dobry!", channel=Channel.WEB)
     cleanup.append(result.submission_id)
     assert result.status is RunStatus.NEEDS_CLARIFICATION
+
+
+def test_similar_claims_differing_in_a_number_are_not_merged(cleanup: list[uuid.UUID]) -> None:
+    tag = uuid.uuid4().hex[:8]
+    embedder = FakeEmbedder()  # same leading word -> nearly identical vectors
+    first = make_intake(FakeLLM([(f"{tag} VAT wynosi 23%.", "factual_claim")]), embedder).submit_text(
+        "x", channel=Channel.WEB
+    )
+    second = make_intake(FakeLLM([(f"{tag} VAT wynosi 25%.", "factual_claim")]), embedder).submit_text(
+        "x", channel=Channel.WEB
+    )
+    cleanup.extend([first.submission_id, second.submission_id])
+
+    assert [c.match for c in second.claims] == ["new"]
+    assert second.claims[0].claim_id != first.claims[0].claim_id
+
+
+def test_embedding_failure_does_not_fail_the_submission(cleanup: list[uuid.UUID]) -> None:
+    class BrokenEmbedder:
+        def embed(self, content: str) -> EmbeddingResult:
+            raise RuntimeError("quota exceeded")
+
+    tag = uuid.uuid4().hex[:8]
+    result = make_intake(
+        FakeLLM([(f"{tag} Inflacja wyniosła 3,6%.", "factual_claim")]), BrokenEmbedder()
+    ).submit_text("x", channel=Channel.WEB)
+    cleanup.append(result.submission_id)
+
+    assert result.status is RunStatus.OK
+    assert [c.match for c in result.claims] == ["new"]
+    with session_factory()() as session:
+        models = session.get_one(VerificationRun, result.run_id).models
+        assert {"role": "embedding", "error": "RuntimeError", "fallback": "exact_text"} in models

@@ -20,6 +20,30 @@ def normalize_claim_text(text: str) -> str:
     return _WHITESPACE.sub(" ", text).strip().rstrip(".!?…").strip()
 
 
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+_WORD = re.compile(r"\w+", re.UNICODE)
+_NEGATIONS = frozenset({"nie", "nigdy", "bez", "brak", "żaden", "żadna", "żadne", "żadnego", "ani"})
+
+
+def same_specifics(first: str, second: str) -> bool:
+    """True when two claim texts agree on every number and on negation.
+
+    Embeddings place "VAT wynosi 23%" next to "VAT wynosi 25%" and a claim next
+    to its negation, so vector similarity alone must never merge such claims:
+    the verdict for one is not the verdict for the other.
+    """
+
+    def numbers(text: str) -> list[str]:
+        return sorted(match.replace(",", ".") for match in _NUMBER.findall(text))
+
+    def negated(text: str) -> bool:
+        # Polish negative concord ("nigdy nie") is one negation, so presence
+        # matters, not the count.
+        return any(word in _NEGATIONS for word in _WORD.findall(text.casefold()))
+
+    return numbers(first) == numbers(second) and negated(first) == negated(second)
+
+
 def claim_text_hash(text: str) -> str:
     return hashlib.sha256(normalize_claim_text(text).encode()).hexdigest()
 

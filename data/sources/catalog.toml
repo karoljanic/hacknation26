@@ -273,6 +273,28 @@ page_size = 50
 max_pages = 3
 
 # --------------------------------------------------------------------------- #
+# Live, per-claim Google Fact Check query (POST /check), unfiltered by
+# publisher so any ClaimReview can be found, not only the five named
+# redactions above. Used only when a cited result's publisher domain does not
+# match one of them; it is then attributed here instead, less individually
+# vetted than the named fact-checkers. No batch collector: this entry exists
+# only so live citations have an auditable, catalogued source to attach to.
+# --------------------------------------------------------------------------- #
+
+[[source]]
+slug = "google-fact-check-live"
+name = "Google Fact Check (zapytanie na żywo)"
+publisher = "Google"
+kind = "fact_checker"
+domain = "toolbox.google.com"
+tier = 2
+license = "Metadane ClaimReview z Google Fact Check Tools API (warunki Google APIs); przechowywane: teza, ocena, link — bez treści artykułu."
+inclusion_rule = "Agregator Google indeksujący ClaimReview dowolnego wydawcy; używany per zgłoszenie obywatela, nie tylko dla wymienionych wyżej redakcji. Każdy cytowany wynik wskazuje własnego wydawcę i link."
+homepage_url = "https://toolbox.google.com/factcheck/explorer"
+[source.collect]
+collector = "google_fact_check_live"
+
+# --------------------------------------------------------------------------- #
 # Verified-disinformation database (collector euvsdisinfo; needs
 # EUVSDISINFO_API_KEY; params: tools, page_size, max_records)
 # --------------------------------------------------------------------------- #

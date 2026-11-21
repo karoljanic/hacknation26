@@ -5,23 +5,38 @@ sent as multipart/form-data so files can be uploaded. The request and response
 schemas are the contract for the web app and the other channels; they appear
 in the OpenAPI docs at /docs.
 
-Request validation works; the verification itself is not implemented yet, so
-a valid request always gets 501 Not Implemented.
+Pipeline: ``ClaimIntake`` (redaction, extraction, dedup, storage) is followed
+by ``EvidenceSearchOrchestrator`` (Google Fact Check + EUvsDisinfo, always in
+parallel), ``SublinkSelector`` (a decision call picks which results to fetch
+in full for an exact quote) and one batched ``AssessmentGenerator`` call.
+Technical failures (missing keys, provider outages, invalid model output) are
+returned as ``status=tech_failure`` with no claims, never as a fabricated
+merit result.
 """
 
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from enum import StrEnum
+import logging
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, HttpUrl, ValidationError, TypeAdapter
 
+from prawdowid.ai.adapters.media import Media
+from prawdowid.api.dependencies import PipelineUnavailable, build_pipeline
+from prawdowid.api.rate_limit import admit_check
+from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.enums import Channel, ClaimKind, RunStatus, Strength, Verdict
-from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES, VIDEO_TYPES
+from prawdowid.services.pipeline import PipelineResult, VerificationPipeline
+from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES, VIDEO_TYPES, NoExtractableContentError
 
-router = APIRouter(tags=["check"])
+router = APIRouter(tags=["check"], dependencies=[Depends(admit_check)])
+logger = logging.getLogger(__name__)
 
 MAX_TEXT_LENGTH = 5000
-NOT_IMPLEMENTED_DETAIL = "Sprawdzanie informacji nie jest jeszcze zaimplementowane."
+TECH_FAILURE_MESSAGE = "Błąd techniczny podczas sprawdzania. Spróbuj ponownie później."
+INVALID_INPUT_MESSAGE = "Nie udało się odczytać treści do sprawdzenia."
 
 _HTTP_URL = TypeAdapter(HttpUrl)
 
@@ -116,13 +131,53 @@ async def _read_media(file: UploadFile, input_type: InputType) -> bytes:
     return data
 
 
+def get_pipeline_factory() -> Callable[[], AbstractAsyncContextManager[VerificationPipeline]]:
+    """Seam for tests: override with ``app.dependency_overrides`` to inject a
+    context manager yielding a stub ``VerificationPipeline`` instead of the
+    real, environment-configured providers."""
+    return build_pipeline
+
+
+def _prepend_question(segments: list[InputSegment], question: str) -> list[InputSegment]:
+    return [InputSegment(id="question-1", text=question, origin="question"), *segments]
+
+
+def _to_check_response(result: PipelineResult) -> "CheckResponse":
+    if result.status != RunStatus.OK:
+        return CheckResponse(run_id=str(result.run_id), status=result.status, message=result.message)
+    claims = [
+        ClaimResult(
+            text=outcome.text,
+            kind=ClaimKind(outcome.kind),
+            verdict=Verdict(outcome.assessment.verdict),
+            strength=Strength(outcome.assessment.strength),
+            explanation=outcome.assessment.explanation,
+            limitations=outcome.assessment.limitations,
+            sources=[
+                Source(
+                    title=outcome.evidence[citation.evidence_index].item.title,
+                    url=outcome.evidence[citation.evidence_index].item.url,
+                    publisher=(
+                        outcome.evidence[citation.evidence_index].item.publisher
+                        or outcome.evidence[citation.evidence_index].item.source
+                    ),
+                    quote=citation.quote,
+                )
+                for citation in outcome.assessment.citations
+            ],
+        )
+        for outcome in result.claims
+    ]
+    return CheckResponse(run_id=str(result.run_id), status=result.status, claims=claims)
+
+
 # -- endpoint ---------------------------------------------------------------- #
 
 
 @router.post(
     "/check",
     response_model=CheckResponse,
-    summary="Sprawdź informację (jeszcze niezaimplementowane)",
+    summary="Sprawdź informację",
     description=(
         "Przyjmuje zgłoszenie jednego z typów (`type`):\n\n"
         "| type | wymagane | opcjonalne |\n"
@@ -133,12 +188,21 @@ async def _read_media(file: UploadFile, input_type: InputType) -> bytes:
         f"| `image` | `file` – {', '.join(sorted(IMAGE_TYPES))} | `text` – pytanie do obrazu |\n"
         f"| `video` | `file` – {', '.join(sorted(VIDEO_TYPES))} | `text` – pytanie do nagrania |\n\n"
         f"Pliki do {MAX_MEDIA_BYTES // 1_000_000} MB, tekst do {MAX_TEXT_LENGTH} znaków.\n\n"
-        "**Jeszcze niezaimplementowane:** poprawne zgłoszenie zwraca zawsze `501 Not Implemented`. "
-        "Walidacja (`413`, `415`, `422`) już działa. Schemat odpowiedzi `200` opisuje docelowy kontrakt."
+        "Brak klucza API, limit dostawcy lub awaria sieci dają `status=tech_failure`, "
+        "nigdy spreparowany werdykt. Walidacja (`413`, `415`, `422`) działa niezależnie. "
+        "Liczba zgłoszeń jest ograniczona (`429`/`503` z `Retry-After`)."
     ),
     responses={
         status.HTTP_413_CONTENT_TOO_LARGE: {"model": ErrorResponse, "description": "Plik jest za duży."},
         status.HTTP_415_UNSUPPORTED_MEDIA_TYPE: {"model": ErrorResponse, "description": "Nieobsługiwany format pliku."},
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            "model": ErrorResponse,
+            "description": "Limit zgłoszeń klienta (na minutę lub dobę). Nagłówek `Retry-After` podaje czas oczekiwania.",
+        },
+        status.HTTP_503_SERVICE_UNAVAILABLE: {
+            "model": ErrorResponse,
+            "description": "Usługa przeciążona lub wyczerpany dzienny limit globalny. `Retry-After` jak wyżej.",
+        },
         status.HTTP_501_NOT_IMPLEMENTED: {
             "model": ErrorResponse,
             "description": "Sprawdzanie nie jest jeszcze zaimplementowane.",
@@ -146,6 +210,9 @@ async def _read_media(file: UploadFile, input_type: InputType) -> bytes:
     },
 )
 async def check(
+    pipeline_factory: Annotated[
+        Callable[[], AbstractAsyncContextManager[VerificationPipeline]], Depends(get_pipeline_factory)
+    ],
     input_type: Annotated[InputType, Form(alias="type", description="Rodzaj zgłoszenia.")],
     text: Annotated[
         str | None,
@@ -181,12 +248,45 @@ async def check(
             raise _invalid("Podany link jest nieprawidłowy.") from exc
     # `url` is ignored for other types (Swagger UI always pre-fills it).
 
+    media: bytes | None = None
     if input_type in ALLOWED_MEDIA_TYPES:
         if file is None or not has_file:
             raise _invalid("Dołącz plik (pole file).")
-        await _read_media(file, input_type)
+        media = await _read_media(file, input_type)
     elif has_file:
         raise _invalid("Plik jest dozwolony tylko dla type=image lub type=video.")
 
-    # TODO: run the verification pipeline (ClaimIntake -> evidence -> assessment).
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=NOT_IMPLEMENTED_DETAIL)
+    try:
+        async with pipeline_factory() as pipeline:
+            if input_type is InputType.URL and text is None:
+                result = await pipeline.run_url(url, channel=channel)  # type: ignore[arg-type]
+            elif input_type in (InputType.TEXT, InputType.QUESTION):
+                result = await pipeline.run_text(
+                    text, channel=channel, question=input_type is InputType.QUESTION  # type: ignore[arg-type]
+                )
+            else:
+                preparer = pipeline.intake.preparer
+                if input_type is InputType.URL:
+                    prepared = preparer.prepare_url(url)  # type: ignore[arg-type]
+                else:
+                    assert file is not None and media is not None
+                    mime_type = (file.content_type or "").lower()
+                    prepared = preparer.prepare_media(Media(data=media, mime_type=mime_type),
+                                                       source_name=file.filename or "upload")
+                if text is not None:
+                    prepared = prepared.model_copy(
+                        update={"segments": _prepend_question(prepared.segments, text)}
+                    )
+                result = await pipeline.run_prepared(prepared, channel=channel)
+    except PipelineUnavailable as exc:
+        logger.error("Pipeline unavailable: %s", exc)
+        return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=str(exc))
+    except (NoExtractableContentError, ValueError) as exc:
+        logger.info("Input could not be prepared: %s", exc)
+        return CheckResponse(run_id="", status=RunStatus.NEEDS_CLARIFICATION, message=INVALID_INPUT_MESSAGE)
+    except Exception:  # provider outage, SDK bug, ... never a merit result
+        logger.warning("Unexpected failure before a run could be opened", exc_info=True)
+        return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=TECH_FAILURE_MESSAGE)
+
+    return _to_check_response(result)
+

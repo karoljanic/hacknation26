@@ -32,18 +32,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
 
-        <div className="notice-bar">
-          <div className="container">
-            Prototyp przygotowany w ramach hackathonu. To nie jest oficjalny serwis administracji
-            publicznej.
-          </div>
-        </div>
-
         {children}
 
         <footer className="footer">
           <div className="container">
-            <p>Prawdowid – prototyp narzędzia do weryfikacji informacji.</p>
+            <p>Prawdowid – narzędzie do weryfikacji informacji.</p>
             <p>Odpowiedzi opierają się na wskazanych źródłach. Zawsze możesz zapoznać się z nimi samodzielnie.</p>
             <ul className="footer__links">
               <li>

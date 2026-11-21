@@ -5,6 +5,7 @@ run status (``tech_failure``, ``needs_clarification``) and never as a verdict.
 No model calls happen inside a DB transaction.
 """
 
+import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -33,6 +34,8 @@ from prawdowid.services.claims import ClaimExtractor
 from prawdowid.services.preparation import InputPreparer, NoExtractableContentError
 
 PIPELINE_VERSION = "intake-0.1"
+
+log = logging.getLogger(__name__)
 
 # Provisional: cosine distance under which two claims of the same kind are
 # treated as the same claim. Needs calibration on real data.
@@ -182,12 +185,19 @@ class ClaimIntake:
     def _embed(
         self, extraction: StructuredResult[ClaimExtraction], models: list[dict[str, Any]]
     ) -> list[tuple[list[float], str] | None]:
+        """Embeddings only improve deduplication, so a provider failure must not
+        fail the submission: those claims are matched by exact text instead."""
         if self.embedder is None:
             return [None] * len(extraction.data.claims)
         vectors: list[tuple[list[float], str] | None] = []
-        for claim in extraction.data.claims:
-            result = self.embedder.embed(claim.text)
-            vectors.append((result.values, result.model))
+        try:
+            for claim in extraction.data.claims:
+                result = self.embedder.embed(claim.text)
+                vectors.append((result.values, result.model))
+        except Exception as exc:
+            log.warning("Claim embedding failed; falling back to exact-text matching", exc_info=True)
+            models.append({"role": "embedding", "error": f"{type(exc).__name__}", "fallback": "exact_text"})
+            return [None] * len(extraction.data.claims)
         if vectors:
             models.append({"role": "embedding", "model": vectors[0][1], "calls": len(vectors)})
         return vectors
@@ -277,7 +287,7 @@ class ClaimIntake:
                 embedding_model=vector[1],
                 max_distance=self.similarity_threshold,
             )
-            if similar is not None:
+            if similar is not None and claim_repo.same_specifics(text, similar[0].canonical_text):
                 return similar[0], f"similar:{similar[1]:.3f}"
         claim = claim_repo.create_claim(
             session,

@@ -83,6 +83,41 @@ nie zapisywać kodów OAuth z callbacka. Nie wystawiaj tych endpointów
 publicznie bez dodatkowego uwierzytelnienia. Oczekujące autoryzacje są
 przechowywane w pamięci jednego procesu API; po restarcie zacznij nową.
 
+## Limity żądań
+
+`POST /check` wywołuje płatne lub limitowane usługi (modele, API źródeł), więc
+każde zgłoszenie przechodzi przez limity (`apps/backend/src/prawdowid/api/rate_limit.py`):
+
+| Limit | Domyślnie | Zmienna |
+| --- | --- | --- |
+| zgłoszenia jednego klienta na minutę | 20 | `CHECK_RATE_LIMIT_PER_MINUTE` |
+| zgłoszenia jednego klienta na dobę | 300 | `CHECK_RATE_LIMIT_PER_DAY` |
+| wszystkie zgłoszenia na dobę (twardy sufit kosztów) | 5000 | `CHECK_GLOBAL_LIMIT_PER_DAY` |
+| równocześnie przetwarzane zgłoszenia | 8 | `CHECK_MAX_CONCURRENT` |
+
+Przekroczenie daje `429` (limit klienta) lub `503` (limit globalny lub
+przeciążenie) z nagłówkiem `Retry-After` — nigdy werdykt. Odrzucone żądanie nie
+zużywa limitu. Strona pokazuje to jako osobny komunikat. Przy testach
+obciążeniowych lub jury podnieś limity w `.env`.
+
+Ograniczenia: liczniki są w pamięci jednego procesu API (restart je zeruje), a
+klientem jest adres połączenia. Za serwerem pośredniczącym, który nadpisuje
+`X-Forwarded-For`, ustaw `CHECK_TRUST_FORWARDED_FOR=true` (używany jest ostatni
+wpis); bez tego wszyscy użytkownicy interfejsu WWW dzielą jeden limit klienta.
+Nie włączaj tej zmiennej, gdy API lub strona są dostępne bezpośrednio —
+nagłówek może wtedy podszyć dowolny klient.
+
+## Deduplikacja tez
+
+Powtórzone twierdzenie jest łączone z już zapisaną tezą: najpierw po dokładnym
+tekście, potem po podobieństwie embeddingów (Gemini, 768 wymiarów, próg
+kosinusowy 0,12 do kalibracji). Podobieństwo wektorowe nie wystarcza: tezy
+różniące się liczbą („VAT 23%” / „VAT 25%”) albo zaprzeczeniem leżą blisko
+siebie, a ocena jednej nie jest oceną drugiej. Dlatego łączenie wymaga też
+tych samych liczb i tej samej polaryzacji (`same_specifics`). Awaria lub limit
+embeddingów nie przerywa sprawdzenia — wtedy działa dopasowanie po dokładnym
+tekście, co odnotowuje `verification_run.models`.
+
 ## Baza danych
 
 PostgreSQL 17 z rozszerzeniem pgvector (`pgvector/pgvector:0.8.1-pg17`).

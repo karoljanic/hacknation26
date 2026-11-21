@@ -52,13 +52,18 @@ services:
       timeout: 5s
       retries: 12
 
-  # One-shot: applies Alembic migrations before the API and workers start.
+  # One-shot: applies Alembic migrations, then syncs the auditable source
+  # catalogue (data/sources/catalog.toml, mounted read-only) before the API
+  # and workers start.
   migrate:
     build:
       context: ../apps/backend
-    command: ["alembic", "upgrade", "head"]
+    command: ["sh", "-c", "alembic upgrade head && python -m prawdowid.ingestion sync-catalog"]
     environment:
       DATABASE_URL: &database_url postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PRAWDOWID_CATALOG: /app/data/sources/catalog.toml
+    volumes:
+      - ../data/sources:/app/data/sources:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,12 +73,28 @@ services:
       context: ../apps/backend
     environment:
       DATABASE_URL: *database_url
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+      FACTCHECK_API_KEY: ${FACTCHECK_API_KEY:-}
+      EUVSDISINFO_API_KEY: ${EUVSDISINFO_API_KEY:-}
       X_CLIENT_ID: ${X_CLIENT_ID:-}
       X_CLIENT_SECRET: ${X_CLIENT_SECRET:-}
       X_REDIRECT_URI: ${X_REDIRECT_URI:-http://127.0.0.1:8000/auth/x/callback}
+      PRAWDOWID_CATALOG: /app/data/sources/catalog.toml
+      GEMINI_PREPARATION_MODEL: ${GEMINI_PREPARATION_MODEL:-}
+      GEMINI_EXTRACTION_MODEL: ${GEMINI_EXTRACTION_MODEL:-}
+      GEMINI_ASSESSMENT_MODEL: ${GEMINI_ASSESSMENT_MODEL:-}
+      GEMINI_THINKING_LEVEL: ${GEMINI_THINKING_LEVEL:-LOW}
+      # Request limits for POST /check (see README, "Limity żądań").
+      CHECK_RATE_LIMIT_PER_MINUTE: ${CHECK_RATE_LIMIT_PER_MINUTE:-20}
+      CHECK_RATE_LIMIT_PER_DAY: ${CHECK_RATE_LIMIT_PER_DAY:-300}
+      CHECK_GLOBAL_LIMIT_PER_DAY: ${CHECK_GLOBAL_LIMIT_PER_DAY:-5000}
+      CHECK_MAX_CONCURRENT: ${CHECK_MAX_CONCURRENT:-8}
+      CHECK_TRUST_FORWARDED_FOR: ${CHECK_TRUST_FORWARDED_FOR:-}
     command: ["uvicorn", "prawdowid.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     volumes:
       - x_auth_data:/home/app/.local/share/prawdowid
+      - ../data/sources:/app/data/sources:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

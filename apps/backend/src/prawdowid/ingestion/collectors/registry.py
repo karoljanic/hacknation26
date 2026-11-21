@@ -45,10 +45,22 @@ def _euvsdisinfo() -> Iterator[Collector]:
     yield EUvsDisinfoCollector(lambda: EUvsDisinfoAdapter.connect(connection))
 
 
+@contextmanager
+def _google_fact_check_live() -> Iterator[Collector]:
+    """Catalogued only so live POST /check citations (any publisher, not just
+    the five named redactions above) have an auditable Source to attach to.
+    Not a batch collector: there is nothing to sweep without a specific claim."""
+    raise CollectorUnavailable(
+        "google-fact-check-live has no batch collector; it only attributes live /check citations"
+    )
+    yield  # pragma: no cover - unreachable, keeps this a generator function
+
+
 COLLECTORS: dict[str, Callable[[], AbstractContextManager[Collector]]] = {
     "gov_pl": _gov_pl,
     "google_fact_check": _google_fact_check,
     "euvsdisinfo": _euvsdisinfo,
+    "google_fact_check_live": _google_fact_check_live,
 }
 
 

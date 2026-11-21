@@ -1,4 +1,7 @@
+import uuid
+from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlparse
 
 import pytest
@@ -6,7 +9,12 @@ from fastapi.testclient import TestClient
 
 from check_scenarios import CONCRETE_SCENARIOS, SCENARIOS, Scenario
 from prawdowid.api.app import app
-from prawdowid.api.check import MAX_TEXT_LENGTH, NOT_IMPLEMENTED_DETAIL
+from prawdowid.api.check import MAX_TEXT_LENGTH, get_pipeline_factory
+from prawdowid.api.rate_limit import CheckGuard, CheckLimits, get_check_guard
+from prawdowid.domain.claims import InputSegment
+from prawdowid.domain.enums import RunStatus
+from prawdowid.domain.preparation import PreparedInput
+from prawdowid.services.pipeline import PipelineResult
 from prawdowid.services.preparation import MAX_MEDIA_BYTES
 
 client = TestClient(app)
@@ -35,6 +43,43 @@ def scenario_request(scenario: Scenario) -> tuple[dict[str, str], FileField | No
     return form, file
 
 
+@pytest.fixture(autouse=True)
+def generous_limits():
+    """These tests send hundreds of requests from one client; rate limiting
+    has its own tests in test_rate_limit.py."""
+    guard = CheckGuard(CheckLimits(per_minute=10_000, per_day=10_000, global_per_day=10_000, max_concurrent=100))
+    app.dependency_overrides[get_check_guard] = lambda: guard
+    yield
+    app.dependency_overrides.pop(get_check_guard, None)
+
+
+@pytest.fixture
+def stub_pipeline():
+    """Deterministic, offline stand-in for the real environment-configured
+    pipeline: no API keys, no network, no LLM calls. Verifies the endpoint's
+    request handling and dependency wiring, not the pipeline's own logic
+    (covered separately in test_pipeline.py / test_assessment.py / ...)."""
+    pipeline = Mock()
+    pipeline.intake.preparer.prepare_url.return_value = PreparedInput(
+        segments=[InputSegment(id="article-1", text="Treść przykładowego artykułu.", origin="article")]
+    )
+    pipeline.intake.preparer.prepare_media.return_value = PreparedInput(
+        segments=[InputSegment(id="ocr-1", text="Tekst odczytany z obrazu.", origin="ocr")]
+    )
+    result = PipelineResult(uuid.uuid4(), uuid.uuid4(), RunStatus.OK, claims=[])
+    pipeline.run_text = AsyncMock(return_value=result)
+    pipeline.run_url = AsyncMock(return_value=result)
+    pipeline.run_prepared = AsyncMock(return_value=result)
+
+    @asynccontextmanager
+    async def factory():
+        yield pipeline
+
+    app.dependency_overrides[get_pipeline_factory] = lambda: factory
+    yield pipeline
+    app.dependency_overrides.pop(get_pipeline_factory, None)
+
+
 # -- documentation ---------------------------------------------------------- #
 
 
@@ -50,17 +95,20 @@ def test_check_is_documented_in_openapi() -> None:
     }
 
 
-# -- current behaviour: valid requests are not implemented yet --------------- #
+# -- valid requests reach the pipeline and come back as 200 ------------------ #
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.id)
-def test_scenario_returns_not_implemented(scenario: Scenario) -> None:
+def test_scenario_reaches_the_pipeline(scenario: Scenario, stub_pipeline) -> None:
     form, file = scenario_request(scenario)
 
     response = post_check(form, file)
 
-    assert response.status_code == 501
-    assert response.json() == {"detail": NOT_IMPLEMENTED_DETAIL}
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert (
+        stub_pipeline.run_text.called or stub_pipeline.run_url.called or stub_pipeline.run_prepared.called
+    )
 
 
 @pytest.mark.parametrize(
@@ -75,8 +123,33 @@ def test_scenario_returns_not_implemented(scenario: Scenario) -> None:
         pytest.param({"type": "text", "text": "Treść", "url": "string"}, id="url-ignored-for-text"),
     ],
 )
-def test_text_inputs_return_not_implemented(form: dict[str, str]) -> None:
-    assert post_check(form).status_code == 501
+def test_text_inputs_reach_the_pipeline(form: dict[str, str], stub_pipeline) -> None:
+    assert post_check(form).status_code == 200
+
+
+def test_text_only_goes_through_run_text(stub_pipeline) -> None:
+    post_check({"type": "text", "text": "Treść."})
+    stub_pipeline.run_text.assert_called_once()
+    stub_pipeline.run_url.assert_not_called()
+
+
+def test_url_without_question_goes_through_run_url(stub_pipeline) -> None:
+    post_check({"type": "url", "url": "https://example.org/a"})
+    stub_pipeline.run_url.assert_called_once()
+    stub_pipeline.run_text.assert_not_called()
+
+
+def test_missing_api_keys_are_a_tech_failure_not_a_verdict(monkeypatch) -> None:
+    """Without stubbing: the real ``build_pipeline`` needs provider API keys."""
+    for name in ("GEMINI_API_KEY", "TYPESAFE_API_KEY", "FACTCHECK_API_KEY", "EUVSDISINFO_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    response = post_check({"type": "text", "text": "Treść."})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "tech_failure"
+    assert body["claims"] == []
 
 
 # -- picture and video ------------------------------------------------------- #
@@ -90,10 +163,11 @@ def test_text_inputs_return_not_implemented(form: dict[str, str]) -> None:
         pytest.param(("zdjecie.webp", WEBP, "image/webp"), id="webp"),
     ],
 )
-def test_picture_upload_is_accepted(file: FileField) -> None:
+def test_picture_upload_is_accepted(file: FileField, stub_pipeline) -> None:
     response = post_check({"type": "image", "text": "Czy to zdjęcie jest aktualne?"}, file)
 
-    assert response.status_code == 501
+    assert response.status_code == 200
+    stub_pipeline.run_prepared.assert_called_once()
 
 
 @pytest.mark.parametrize(
@@ -104,14 +178,15 @@ def test_picture_upload_is_accepted(file: FileField) -> None:
         pytest.param(("film.mov", MP4, "video/quicktime"), id="mov"),
     ],
 )
-def test_video_upload_is_accepted(file: FileField) -> None:
+def test_video_upload_is_accepted(file: FileField, stub_pipeline) -> None:
     response = post_check({"type": "video"}, file)
 
-    assert response.status_code == 501
+    assert response.status_code == 200
+    stub_pipeline.run_prepared.assert_called_once()
 
 
-def test_picture_without_question_is_accepted() -> None:
-    assert post_check({"type": "image"}, ("a.png", PNG, "image/png")).status_code == 501
+def test_picture_without_question_is_accepted(stub_pipeline) -> None:
+    assert post_check({"type": "image"}, ("a.png", PNG, "image/png")).status_code == 200
 
 
 @pytest.mark.parametrize(
