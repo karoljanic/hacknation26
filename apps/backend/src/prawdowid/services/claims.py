@@ -17,6 +17,20 @@ Mark missing context and unresolved relative dates (e.g. tomorrow); never assume
 that the date of processing is the publication date. Do not invent missing names.
 Use unique claim IDs. Return an empty claims list only when there are no relevant
 claims, questions or opinions. Preserve distinct dates, places and quantities.
+For each factual_claim and verification_question also give:
+- search_queries: 2-4 short Polish keyword queries (2-5 words each) for a search
+  engine that matches words, not meaning. Use the key nouns, names and numbers;
+  vary the wording with synonyms and other grammatical forms a fact-check or
+  official announcement would likely use (e.g. "65-latkowie darmowa komunikacja",
+  "bezpłatne przejazdy seniorzy Wrocław"). No question words, no full sentences.
+- countries: ISO 3166-1 alpha-2 codes of foreign countries (not Poland) the item
+  is about, e.g. "IT" for "we Włoszech"; empty when none.
+- general_knowledge: true only for an established, time-independent fact of
+  history, geography, science or mathematics (e.g. the year of the Battle of
+  Grunwald, the height of Mount Everest, the boiling point of water). false for
+  anything about current or recent events, people's statements, policies,
+  prices, current statistics, rankings or anything that can change.
+Leave these empty or false for opinions.
 """
 
 

@@ -96,7 +96,11 @@ class VerificationPipeline:
 
         by_id = {str(stored.claim_id): stored for stored in intake_result.claims}
         claims = [
-            ClaimForVerification(id=claim_id, text=stored.text, kind=stored.kind.value)
+            ClaimForVerification(
+                id=claim_id, text=stored.text, kind=stored.kind.value,
+                search_queries=list(stored.search_queries), countries=list(stored.countries),
+                general_knowledge=stored.general_knowledge,
+            )
             for claim_id, stored in by_id.items()
         ]
         claim_lookup = {claim.id: claim for claim in claims}
@@ -119,9 +123,15 @@ class VerificationPipeline:
                 judged_by="deterministic:opinion",
             )
 
-        with_evidence = [claim_evidence for claim_evidence in search_result.claims if claim_evidence.items]
+        # General-knowledge claims go to the model even without evidence: it may
+        # answer them from general knowledge, clearly labelled as unsourced.
+        with_evidence = [
+            claim_evidence
+            for claim_evidence in search_result.claims
+            if claim_evidence.items or claim_lookup[claim_evidence.claim_id].general_knowledge
+        ]
         for claim_evidence in search_result.claims:
-            if not claim_evidence.items:
+            if claim_evidence not in with_evidence:
                 stored = by_id[claim_evidence.claim_id]
                 outcomes[claim_evidence.claim_id] = ClaimOutcome(
                     claim_evidence.claim_id, stored.text, stored.kind.value,
@@ -147,6 +157,7 @@ class VerificationPipeline:
                 claim_text=claim_lookup[claim_evidence.claim_id].text,
                 claim_kind=claim_lookup[claim_evidence.claim_id].kind,  # type: ignore[arg-type]
                 evidence=bundle_evidence[claim_evidence.claim_id],
+                general_knowledge_allowed=claim_lookup[claim_evidence.claim_id].general_knowledge,
             )
             for claim_evidence in with_evidence
         ]

@@ -85,3 +85,22 @@ def test_empty_items_short_circuits_without_calling_decision() -> None:
 def test_invalid_bounds_are_rejected() -> None:
     with pytest.raises(ValueError):
         SublinkSelector(decision=Mock(), preparer=Mock(), max_candidates=1, max_selected=2)
+
+
+def test_odyseusz_items_are_never_fetched_and_count_as_full_text() -> None:
+    advisory = EvidenceItem(
+        source="odyseusz", kind="official", title="Komunikat MSZ", url="https://odyseusz.gov.pl/IT",
+        snippet="Pełny komunikat MSZ.",
+    )
+    items = [advisory, item("https://demagog.org.pl/a")]
+    decision = Mock()
+    decision.decide.return_value = decision_result([0.9])
+    preparer = Mock()
+    preparer.prepare_url.return_value = Mock(segments=[Mock(text="Pełna treść artykułu.")])
+
+    bundle = SublinkSelector(decision=decision, preparer=preparer, threshold=0.5).select("Teza.", items)
+
+    preparer.prepare_url.assert_called_once_with("https://demagog.org.pl/a")
+    assert len(decision.decide.call_args.args[1]) == 1
+    assert bundle[0].fully_fetched is True and bundle[0].text == "Pełny komunikat MSZ."
+    assert bundle[1].text == "Pełna treść artykułu."

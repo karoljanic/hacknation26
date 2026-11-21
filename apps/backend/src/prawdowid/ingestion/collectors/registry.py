@@ -56,11 +56,21 @@ def _google_fact_check_live() -> Iterator[Collector]:
     yield  # pragma: no cover - unreachable, keeps this a generator function
 
 
+@contextmanager
+def _live_only() -> Iterator[Collector]:
+    """For sources queried only per claim during POST /check (gov.pl site
+    search, MSZ Odyseusz): catalogued so their citations attach to an audited
+    Source, but there is nothing to sweep in batch without a claim."""
+    raise CollectorUnavailable("this source is queried live per claim only; it has no batch collector")
+    yield  # pragma: no cover - unreachable, keeps this a generator function
+
+
 COLLECTORS: dict[str, Callable[[], AbstractContextManager[Collector]]] = {
     "gov_pl": _gov_pl,
     "google_fact_check": _google_fact_check,
     "euvsdisinfo": _euvsdisinfo,
     "google_fact_check_live": _google_fact_check_live,
+    "live_only": _live_only,
 }
 
 

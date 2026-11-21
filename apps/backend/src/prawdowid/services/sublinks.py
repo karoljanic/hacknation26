@@ -13,7 +13,10 @@ from prawdowid.ai.adapters.decision import BooleanQuestion, DecisionAdapter
 from prawdowid.domain.evidence import EvidenceForAssessment, EvidenceItem
 from prawdowid.services.preparation import InputPreparer, NoExtractableContentError
 
-MAX_CANDIDATES_PER_CLAIM = 6  # bounds decision-adapter cost
+MAX_CANDIDATES_PER_CLAIM = 8  # bounds decision-adapter cost
+# Items whose snippet already is the full text and whose page is a JS app the
+# fetcher cannot read: never worth a fetch.
+FULL_TEXT_SOURCES = frozenset({"odyseusz"})
 MAX_SELECTED_PER_CLAIM = 3  # bounds crawl latency/cost
 SELECTION_THRESHOLD = 0.5
 
@@ -50,9 +53,14 @@ class SublinkSelector:
         if not items:
             return []
         bundle = [
-            EvidenceForAssessment(item=item, text=item.snippet, fully_fetched=False) for item in items
+            EvidenceForAssessment(item=item, text=item.snippet, fully_fetched=item.source in FULL_TEXT_SOURCES)
+            for item in items
         ]
-        candidates = items[: self.max_candidates]
+        positions = [index for index, item in enumerate(items) if item.source not in FULL_TEXT_SOURCES]
+        positions = positions[: self.max_candidates]
+        if not positions:
+            return bundle
+        candidates = [items[position] for position in positions]
         questions = {
             str(index): BooleanQuestion(
                 instructions=SELECTION_INSTRUCTIONS.format(
@@ -81,7 +89,9 @@ class SublinkSelector:
         for index in selected:
             fetched = self._fetch(str(candidates[index].url))
             if fetched is not None:
-                bundle[index] = EvidenceForAssessment(item=candidates[index], text=fetched, fully_fetched=True)
+                bundle[positions[index]] = EvidenceForAssessment(
+                    item=candidates[index], text=fetched, fully_fetched=True
+                )
         return bundle
 
     def _fetch(self, url: str) -> str | None:

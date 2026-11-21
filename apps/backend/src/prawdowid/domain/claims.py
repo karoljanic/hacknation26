@@ -2,6 +2,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+MAX_SEARCH_QUERIES = 4
+MAX_QUERY_CHARS = 80
+MAX_COUNTRIES = 3
+
 
 class TextRegion(BaseModel):
     """Approximate bounding box in normalized image coordinates."""
@@ -65,6 +69,15 @@ class Claim(BaseModel):
     kind: Literal["factual_claim", "verification_question", "opinion"]
     references: list[ClaimReference] = Field(min_length=1)
     ambiguities: list[str]
+    # Short keyword queries for search engines that match words, not meaning
+    # (Google Fact Check, gov.pl search); include synonyms of the claim wording.
+    search_queries: list[str] = Field(default_factory=list)
+    # ISO 3166-1 alpha-2 codes of foreign countries the claim is about, for the
+    # MSZ travel advisories (Odyseusz).
+    countries: list[str] = Field(default_factory=list)
+    # Established, time-independent fact of history, geography, science or
+    # mathematics; only such claims may be answered from general knowledge.
+    general_knowledge: bool = False
 
     @field_validator("id", "text")
     @classmethod
@@ -72,6 +85,27 @@ class Claim(BaseModel):
         if not value.strip():
             raise ValueError("Value must not be blank")
         return value
+
+    @field_validator("search_queries")
+    @classmethod
+    def clean_queries(cls, values: list[str]) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            query = " ".join(value.split())
+            if query and len(query) <= MAX_QUERY_CHARS and query not in cleaned:
+                cleaned.append(query)
+        return cleaned[:MAX_SEARCH_QUERIES]
+
+    @field_validator("countries")
+    @classmethod
+    def clean_countries(cls, values: list[str]) -> list[str]:
+        # Invalid codes are dropped, not fatal: they only steer an optional source.
+        codes: list[str] = []
+        for value in values:
+            code = value.strip().upper()
+            if len(code) == 2 and code.isascii() and code.isalpha() and code not in codes:
+                codes.append(code)
+        return codes[:MAX_COUNTRIES]
 
 
 class ClaimExtraction(BaseModel):

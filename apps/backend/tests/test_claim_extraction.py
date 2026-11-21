@@ -139,3 +139,16 @@ def test_structured_generation_surfaces_invalid_model_output(text: str | None) -
         GeminiAdapter(client, "test").generate_structured(
             "input", ClaimExtraction, instructions="Extract claims."
         )
+
+
+def test_malformed_search_hints_from_the_model_are_cleaned_not_fatal() -> None:
+    extracted = Claim.model_validate(
+        {
+            **claim().model_dump(),
+            "search_queries": ["  strajk   Włochy ", "strajk Włochy", "", "x" * 200, "a", "b", "c", "d"],
+            "countries": ["it", "ITA", "PL", "1X", "IT"],
+        }
+    )
+
+    assert extracted.search_queries == ["strajk Włochy", "a", "b", "c"]
+    assert extracted.countries == ["IT", "PL"]

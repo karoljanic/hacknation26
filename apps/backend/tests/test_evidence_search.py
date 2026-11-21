@@ -1,10 +1,13 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 from pydantic import HttpUrl
 
+from prawdowid.adapters.sources.gov_api import CountryAdvisory, GovPlSearchClient, GovSearchHit, OdyseuszClient
+from prawdowid.adapters.sources.wikipedia import WikipediaArticle, WikipediaClient
 from prawdowid.domain.evidence import ClaimForVerification, EvidenceItem
 from prawdowid.domain.euvsdisinfo import EUvsDisinfoResult
 from prawdowid.domain.fact_checks import FactCheckClaim, FactCheckPage, FactCheckPublisher, FactCheckReview, FactCheckSource
@@ -210,3 +213,112 @@ def test_gov_selection_failure_degrades_gracefully() -> None:
 
     assert result.claims[0].items == []
     assert result.claims[0].unavailable_sources == []
+
+
+def test_model_written_queries_are_sent_to_google_after_the_full_text() -> None:
+    queries = search_queries("Wrocław był jedynym miastem.", ["bezpłatne przejazdy seniorzy Wrocław"])
+
+    assert queries[:2] == ["Wrocław był jedynym miastem.", "bezpłatne przejazdy seniorzy Wrocław"]
+
+
+def gov_hit(title: str, intro: str = "", url: str = "https://www.gov.pl/web/belgia/a") -> GovSearchHit:
+    return GovSearchHit(title=title, intro=intro, url=url, section="belgia", published_at=None)
+
+
+def test_gov_search_keeps_only_hits_sharing_most_query_terms() -> None:
+    google = Mock(spec=FactCheckSource)
+    google.search_text.return_value = google_page([])
+    euvsdisinfo = Mock()
+    euvsdisinfo.search = AsyncMock(return_value=euvsdisinfo_result([]))
+    gov_search = Mock(spec=GovPlSearchClient)
+    gov_search.search.return_value = [
+        gov_hit("Dyrektor Generalny", url="https://www.gov.pl/web/wug/dyrektor-generalny"),
+        gov_hit("Strajk generalny we Włochach 20 listopada", "Utrudnienia w transporcie.", "https://www.gov.pl/web/wlochy/strajk"),
+    ]
+    target = ClaimForVerification(
+        id="c1", text="Czy we Włoszech był strajk generalny?", kind="verification_question",
+        search_queries=["strajk generalny Włochy"],
+    )
+
+    result = asyncio.run(
+        EvidenceSearchOrchestrator(google=google, euvsdisinfo=euvsdisinfo, gov_search=gov_search).search([target])
+    )
+
+    gov_items = [item for item in result.claims[0].items if item.source == "gov_pl_search"]
+    assert [str(item.url) for item in gov_items] == ["https://www.gov.pl/web/wlochy/strajk"]
+    assert gov_items[0].catalog_slug == "gov-pl-search"
+    gov_search.search.assert_called_once_with("strajk generalny Włochy", size=10)
+
+
+def advisory(code: str = "IT") -> CountryAdvisory:
+    return CountryAdvisory(
+        code=code, name="Włochy", page_url=f"https://odyseusz.gov.pl/{code}", updated_at=date(2026, 11, 19),
+        notice="W dniu 20 listopada zapowiedziano strajk generalny.",
+        warnings=["Poziom 1 - Zwykła ostrożność"], sections=[("Bezpieczeństwo", "Uważaj na kieszonkowców.")],
+    )
+
+
+def test_odyseusz_profiles_are_fetched_for_foreign_countries_only() -> None:
+    google = Mock(spec=FactCheckSource)
+    google.search_text.return_value = google_page([])
+    euvsdisinfo = Mock()
+    euvsdisinfo.search = AsyncMock(return_value=euvsdisinfo_result([]))
+    odyseusz = Mock(spec=OdyseuszClient)
+    odyseusz.country.return_value = advisory()
+    target = ClaimForVerification(
+        id="c1", text="Czy we Włoszech był strajk generalny?", kind="verification_question", countries=["PL", "IT"],
+    )
+
+    result = asyncio.run(
+        EvidenceSearchOrchestrator(google=google, euvsdisinfo=euvsdisinfo, odyseusz=odyseusz).search([target])
+    )
+
+    odyseusz.country.assert_called_once_with("IT")
+    items = [item for item in result.claims[0].items if item.source == "odyseusz"]
+    assert items[0].snippet == "W dniu 20 listopada zapowiedziano strajk generalny."
+    assert items[0].published_at == datetime(2026, 11, 19, tzinfo=timezone.utc)
+    assert "Poziom 1" in items[1].snippet and "Bezpieczeństwo: Uważaj na kieszonkowców." in items[1].snippet
+
+
+def test_odyseusz_outage_is_reported_not_hidden() -> None:
+    google = Mock(spec=FactCheckSource)
+    google.search_text.return_value = google_page([])
+    euvsdisinfo = Mock()
+    euvsdisinfo.search = AsyncMock(return_value=euvsdisinfo_result([]))
+    odyseusz = Mock(spec=OdyseuszClient)
+    odyseusz.country.side_effect = RuntimeError("timeout")
+    target = ClaimForVerification(id="c1", text="Strajk we Włoszech.", kind="factual_claim", countries=["IT"])
+
+    result = asyncio.run(
+        EvidenceSearchOrchestrator(google=google, euvsdisinfo=euvsdisinfo, odyseusz=odyseusz).search([target])
+    )
+
+    assert result.claims[0].unavailable_sources == ["odyseusz"]
+
+
+def test_wikipedia_articles_become_citable_tier3_items_and_outages_are_reported() -> None:
+    google = Mock(spec=FactCheckSource)
+    google.search_text.return_value = google_page([])
+    euvsdisinfo = Mock()
+    euvsdisinfo.search = AsyncMock(return_value=euvsdisinfo_result([]))
+    wikipedia = Mock(spec=WikipediaClient)
+    wikipedia.search.return_value = ["Bitwa pod Grunwaldem"]
+    wikipedia.intros.return_value = [
+        WikipediaArticle("Bitwa pod Grunwaldem", "https://pl.wikipedia.org/wiki/Bitwa_pod_Grunwaldem", "Stoczona 15 lipca 1410.")
+    ]
+    target = ClaimForVerification(
+        id="c1", text="Kiedy była bitwa pod Grunwaldem?", kind="verification_question",
+        search_queries=["bitwa pod Grunwaldem", "Grunwald 1410"],
+    )
+    orchestrator = EvidenceSearchOrchestrator(google=google, euvsdisinfo=euvsdisinfo, wikipedia=wikipedia)
+
+    result = asyncio.run(orchestrator.search([target]))
+
+    items = [item for item in result.claims[0].items if item.source == "wikipedia"]
+    assert [(item.title, item.catalog_slug, item.snippet) for item in items] == [
+        ("Bitwa pod Grunwaldem", "wikipedia-pl", "Stoczona 15 lipca 1410.")
+    ]
+    wikipedia.intros.assert_called_once_with(["Bitwa pod Grunwaldem"])
+
+    wikipedia.search.side_effect = httpx.ConnectError("down")
+    assert asyncio.run(orchestrator.search([target])).claims[0].unavailable_sources == ["wikipedia"]

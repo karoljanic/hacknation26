@@ -146,9 +146,12 @@ SCENARIOS: tuple[Scenario, ...] = (
             "Czy Demagog sprawdzał, czy Wrocław był jedynym miastem "
             "z darmowymi przejazdami dla 65-latków?"
         ),
-        expected_verdicts=frozenset({"false"}),
+        # "Did Demagog check X?" -> "Yes, and rated it false": confirmed answers
+        # the question; false fits when the underlying claim is extracted.
+        expected_verdicts=frozenset({"confirmed", "false"}),
         source_domain="demagog.org.pl",
         notes=(
+            "Odpowiedź: „Tak, Demagog to sprawdził i ocenił twierdzenie jako fałsz” z linkiem. "
             "Przy awarii wyszukiwania: status tech_failure, nie „nie ma takiego artykułu”. "
             "Ten wariant wymaga atrapy źródła, nie zapytania HTTP."
         ),

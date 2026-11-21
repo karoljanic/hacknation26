@@ -27,6 +27,8 @@ from prawdowid.ingestion.catalog import load_catalog
 from prawdowid.persistence.db import session_factory
 from prawdowid.persistence.models import EMBEDDING_DIM
 from prawdowid.services.assessment import AssessmentGenerator
+from prawdowid.adapters.sources.gov_api import GovPlSearchClient, OdyseuszClient
+from prawdowid.adapters.sources.wikipedia import WikipediaClient
 from prawdowid.services.claims import ClaimExtractor
 from prawdowid.services.evidence_search import EvidenceSearchOrchestrator
 from prawdowid.services.gov_connectors import GovConnectorSelector
@@ -62,6 +64,9 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
     with (
         genai.Client(api_key=keys["GEMINI_API_KEY"], http_options=types.HttpOptions(timeout=30000)) as genai_client,
         httpx.Client() as google_http,
+        GovPlSearchClient() as gov_search,
+        OdyseuszClient() as odyseusz,
+        WikipediaClient() as wikipedia,
         TypeSafeClient(api_key=keys["TYPESAFE_API_KEY"], timeout=30, retry=RetryPolicy(max_retries=0)) as typesafe,
     ):
         connection = EUvsDisinfoConnection(api_key=keys["EUVSDISINFO_API_KEY"])
@@ -83,6 +88,9 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
                 gov_selector=GovConnectorSelector(decision=decision, entries=gov_pl_entries)
                 if gov_pl_entries
                 else None,
+                gov_search=gov_search,
+                odyseusz=odyseusz,
+                wikipedia=wikipedia,
             )
             sublinks = SublinkSelector(decision=decision, preparer=preparer)
             assessment = AssessmentGenerator(llm=GeminiAdapter(genai_client, ASSESSMENT_MODEL, thinking_level=THINKING_LEVEL))

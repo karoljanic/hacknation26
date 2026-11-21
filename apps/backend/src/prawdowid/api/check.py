@@ -18,7 +18,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from enum import StrEnum
 import logging
-from typing import Annotated
+from typing import Literal, Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, HttpUrl, ValidationError, TypeAdapter
@@ -72,6 +72,10 @@ class ClaimResult(BaseModel):
     strength: Strength = Field(description="Siła podstawy odpowiedzi.")
     explanation: str = Field(description="Krótkie uzasadnienie prostym językiem.")
     limitations: str | None = Field(default=None, description="Ograniczenia odpowiedzi i źródeł.")
+    basis: Literal["evidence", "general_knowledge"] = Field(
+        default="evidence",
+        description="`general_knowledge`: odpowiedź z wiedzy ogólnej modelu, bez źródła (zawsze słaba).",
+    )
     sources: list[Source] = Field(description="Źródła, na których oparto ocenę. Puste, gdy ich brak.")
 
 
@@ -153,6 +157,7 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
             strength=Strength(outcome.assessment.strength),
             explanation=outcome.assessment.explanation,
             limitations=outcome.assessment.limitations,
+            basis=outcome.assessment.reasons.basis,
             sources=[
                 Source(
                     title=outcome.evidence[citation.evidence_index].item.title,

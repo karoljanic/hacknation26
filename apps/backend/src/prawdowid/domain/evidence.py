@@ -13,8 +13,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
-EvidenceSource = Literal["google_fact_check", "euvsdisinfo", "gov_pl"]
-EvidenceKind = Literal["claim_review", "case", "article", "official"]
+EvidenceSource = Literal["google_fact_check", "euvsdisinfo", "gov_pl", "gov_pl_search", "odyseusz", "wikipedia"]
+EvidenceKind = Literal["claim_review", "case", "article", "official", "encyclopedia"]
+AssessmentBasis = Literal["evidence", "general_knowledge"]
 EvidenceRelation = Literal["supports", "refutes", "adds_context"]
 Verdict = Literal["confirmed", "false", "misleading", "insufficient_evidence", "unverifiable"]
 Strength = Literal["strong", "moderate", "weak"]
@@ -32,6 +33,9 @@ class ClaimForVerification(BaseModel):
     id: str = Field(min_length=1)
     text: str = Field(min_length=1)
     kind: ClaimKindLiteral
+    search_queries: list[str] = Field(default_factory=list)
+    countries: list[str] = Field(default_factory=list)
+    general_knowledge: bool = False
 
 
 class EvidenceItem(BaseModel):
@@ -92,7 +96,9 @@ class ClaimEvidenceBundle(BaseModel):
     claim_id: str = Field(min_length=1)
     claim_text: str = Field(min_length=1)
     claim_kind: Literal["factual_claim", "verification_question"]
-    evidence: list[EvidenceForAssessment] = Field(min_length=1)
+    # Empty only for a general-knowledge claim nothing was found for.
+    evidence: list[EvidenceForAssessment]
+    general_knowledge_allowed: bool = False
 
 
 # -- final assessment output (one structured LLM call) ----------------------- #
@@ -110,6 +116,10 @@ class AssessmentReasons(BaseModel):
     independent_sources: int = Field(ge=0, description="Number of independent sources agreeing.")
     recency_days: int | None = Field(default=None, ge=0, description="Age of the most relevant source.")
     conflicting_sources: bool = Field(description="Whether sources disagree on the claim.")
+    basis: AssessmentBasis = Field(
+        default="evidence",
+        description='"general_knowledge" only when the verdict rests on established general knowledge, not on cited evidence.',
+    )
 
 
 class EvidenceCitation(BaseModel):

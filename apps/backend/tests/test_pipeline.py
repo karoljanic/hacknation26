@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import uuid
 from unittest.mock import AsyncMock, Mock
 
@@ -135,8 +136,46 @@ def test_claim_without_any_evidence_abstains_without_calling_the_llm() -> None:
     result = asyncio.run(pipeline.run_text("Nowa teza bez dowodów.", channel=Channel.WEB))
 
     assert result.claims[0].assessment.verdict == "insufficient_evidence"
-    assert "euvsdisinfo" in result.claims[0].assessment.limitations
+    assert "EUvsDisinfo" in result.claims[0].assessment.limitations
     assessment.assess.assert_not_called()
+
+
+def test_general_knowledge_claim_without_evidence_still_reaches_the_model() -> None:
+    run_id, claim_id = uuid.uuid4(), uuid.uuid4()
+    intake = Mock()
+    general = dataclasses.replace(stored(claim_id, "Bitwa pod Grunwaldem była w 1410 roku."), general_knowledge=True)
+    intake.submit_text.return_value = intake_result(RunStatus.OK, [general], run_id=run_id)
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(
+        return_value=EvidenceSearchResult(claims=[ClaimEvidence(claim_id=str(claim_id), items=[])], skipped_opinion_ids=[])
+    )
+    sublinks = Mock()
+    sublinks.select.return_value = []
+    assessment = Mock()
+    assessment.assess.return_value = Mock(
+        requested_model="m",
+        data=SubmissionAssessmentOutput(
+            assessments=[
+                ClaimAssessmentOutput(
+                    claim_id=str(claim_id), verdict="confirmed", strength="weak",
+                    reasons=AssessmentReasons(
+                        source_tiers=[], independent_sources=0, conflicting_sources=False, basis="general_knowledge"
+                    ),
+                    explanation="Tak, w 1410 roku.", citations=[],
+                )
+            ]
+        ),
+    )
+    pipeline = make_pipeline(
+        run=VerificationRun(id=run_id, status=RunStatus.RUNNING, pipeline_version="t"),
+        intake=intake, evidence_search=evidence_search, sublinks=sublinks, assessment=assessment,
+    )
+
+    result = asyncio.run(pipeline.run_text("Bitwa pod Grunwaldem była w 1410 roku.", channel=Channel.WEB))
+
+    bundle = assessment.assess.call_args.args[0][0]
+    assert bundle.evidence == [] and bundle.general_knowledge_allowed is True
+    assert result.claims[0].assessment.reasons.basis == "general_knowledge"
 
 
 def test_claim_with_evidence_goes_through_sublinks_and_assessment() -> None:

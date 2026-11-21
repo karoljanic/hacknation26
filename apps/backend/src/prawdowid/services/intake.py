@@ -56,6 +56,10 @@ class StoredClaim:
     kind: ClaimKind
     relation: SubmissionClaimRelation
     match: str  # "new" | "exact" | "similar:<distance>"
+    # Search hints from this submission's extraction (not persisted).
+    search_queries: tuple[str, ...] = ()
+    countries: tuple[str, ...] = ()
+    general_knowledge: bool = False
 
 
 @dataclass(frozen=True)
@@ -265,6 +269,9 @@ class ClaimIntake:
                         kind=kind,
                         relation=link.relation,
                         match=match,
+                        search_queries=tuple(extracted.search_queries),
+                        countries=tuple(extracted.countries),
+                        general_knowledge=extracted.general_knowledge,
                     )
                 )
         return stored

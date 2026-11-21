@@ -19,6 +19,7 @@ type Claim = {
   strength: Strength;
   explanation: string;
   limitations: string | null;
+  basis: "evidence" | "general_knowledge";
   sources: Source[];
 };
 
@@ -159,6 +160,7 @@ export function CheckForm() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (state.kind === "loading") return; // Enter in a single-field form still submits without the button
     if (isMedia && !file) {
       setFileError(type === "image" ? "Wybierz zdjęcie." : "Wybierz nagranie.");
       return;
@@ -326,10 +328,13 @@ export function CheckForm() {
           />
         </div>
 
-        <button type="submit" className="button" disabled={state.kind === "loading"}>
-          {state.kind === "loading" ? "Sprawdzanie…" : "Sprawdź"}
-        </button>
-        {state.kind === "loading" && <SearchProgress />}
+        {state.kind === "loading" ? (
+          <SearchProgress />
+        ) : (
+          <button type="submit" className="button">
+            Sprawdź
+          </button>
+        )}
       </form>
 
       <div aria-live="polite" className="result-region">
@@ -464,6 +469,9 @@ function ClaimResult({ claim }: { claim: Claim }) {
       <div className="claim-result__badges">
         <span className={`verdict ${VERDICT_STYLE[claim.verdict]}`}>{VERDICT_LABEL[claim.verdict]}</span>
         <span className="strength">{STRENGTH_LABEL[claim.strength]}</span>
+        {claim.basis === "general_knowledge" && (
+          <span className="basis-badge">Wiedza ogólna – bez źródła</span>
+        )}
       </div>
       <p className="claim-result__explanation">{claim.explanation}</p>
       {claim.limitations && (
