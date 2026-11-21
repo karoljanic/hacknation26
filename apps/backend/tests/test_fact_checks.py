@@ -278,3 +278,20 @@ def test_claim_cli_fact_check_is_opt_in_and_preserves_claim_links(
     else:
         assert "fact_checks" not in output
         factory.assert_not_called()
+
+
+def test_claim_cli_rejects_store_and_fact_check_before_model_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = Path(__file__).parents[1] / "examples" / "extract_claims.py"
+    spec = importlib.util.spec_from_file_location("extract_claims_demo", path)
+    assert spec is not None and spec.loader is not None
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
+    client = Mock()
+    monkeypatch.setattr(demo.genai, "Client", client)
+    monkeypatch.setattr("sys.argv", ["extract_claims.py", "--text", "Teza.", "--store", "--fact-check"])
+    with pytest.raises(SystemExit) as raised:
+        demo.main()
+    assert raised.value.code == 2
+    client.assert_not_called()

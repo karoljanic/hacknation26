@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from dataclasses import asdict
 from pathlib import Path
 
 import httpx
@@ -10,12 +11,17 @@ from pydantic import TypeAdapter
 
 from prawdowid.ai.adapters.media import Media
 from prawdowid.ai.instances.gemini import GeminiAdapter
+from prawdowid.ai.instances.gemini_embeddings import GeminiEmbeddingAdapter
 from prawdowid.adapters.sources.google_fact_check import GoogleFactCheckAdapter
 from prawdowid.adapters.sources.web import PublicWebFetcher
 from prawdowid.domain.claims import InputSegment
+from prawdowid.domain.enums import Channel
 from prawdowid.domain.preparation import PreparedInput
+from prawdowid.persistence.db import session_factory
+from prawdowid.persistence.models import EMBEDDING_DIM
 from prawdowid.services.claims import ClaimExtractor
 from prawdowid.services.fact_checks import FactCheckTool
+from prawdowid.services.intake import ClaimIntake
 from prawdowid.services.preparation import MAX_MEDIA_BYTES, InputPreparer
 
 MIME_BY_SUFFIX = {
@@ -46,9 +52,16 @@ def main() -> None:
     inputs.add_argument("--segments", type=Path, help="JSON file containing normalized segments")
     parser.add_argument("--model", default="gemini-2.5-flash")
     parser.add_argument("--preparation-model", default="gemini-2.5-flash")
-    parser.add_argument(
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument(
         "--fact-check", action="store_true", help="Search extracted claims in Google Fact Check"
     )
+    actions.add_argument(
+        "--store",
+        action="store_true",
+        help="Save the submission and deduplicated claims to DATABASE_URL (redacts PII first)",
+    )
+    parser.add_argument("--channel", default=Channel.DEMO.value, choices=[c.value for c in Channel])
     args = parser.parse_args()
     fact_check_key = os.environ["FACTCHECK_API_KEY"] if args.fact_check else None
     if fact_check_key is not None and not fact_check_key.strip():
@@ -61,6 +74,27 @@ def main() -> None:
         preparer = InputPreparer(
             llm=GeminiAdapter(client, args.preparation_model), fetcher=PublicWebFetcher()
         )
+        if args.store:
+            intake = ClaimIntake(
+                session_factory=session_factory(),
+                preparer=preparer,
+                extractor=ClaimExtractor(GeminiAdapter(client, args.model)),
+                embedder=GeminiEmbeddingAdapter(client, dimensions=EMBEDDING_DIM),
+            )
+            channel = Channel(args.channel)
+            if args.url is not None:
+                outcome = intake.submit_url(args.url, channel=channel)
+            elif args.text is not None or args.question is not None:
+                outcome = intake.submit_text(
+                    args.question if args.question is not None else args.text,
+                    channel=channel,
+                    question=args.question is not None,
+                )
+            else:
+                outcome = None  # media / segments: prepared below, then stored
+            if outcome is not None:
+                print(json.dumps(asdict(outcome), default=str, ensure_ascii=False, indent=2))
+                return
         media_path = args.image or args.audio or args.video
         if media_path is not None:
             mime_type = MIME_BY_SUFFIX.get(media_path.suffix.lower())
@@ -83,6 +117,10 @@ def main() -> None:
                 args.question if args.question is not None else args.text,
                 question=args.question is not None,
             )
+        if args.store:
+            outcome = intake.submit_prepared(prepared, channel=channel)
+            print(json.dumps(asdict(outcome), default=str, ensure_ascii=False, indent=2))
+            return
         result = ClaimExtractor(GeminiAdapter(client, args.model)).extract(prepared.segments)
 
     fact_checks = None
