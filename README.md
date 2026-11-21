@@ -10,8 +10,10 @@ AI, schemat bazy (PostgreSQL + pgvector) i przyjmowanie zgłoszeń z CLI:
 tekst/URL/media → maskowanie danych osobowych → ekstrakcja tez → zapis tez
 z deduplikacją, oraz zasilanie korpusu źródeł (gov.pl, fact-checki przez
 Google Fact Check, EUvsDisinfo) z podziałem na fragmenty i embeddingami.
-Nie ma jeszcze API zgłoszeń, wyszukiwania dowodów ani werdyktów. Endpoint `/health` potwierdza tylko działanie procesu
-API; `/health/ready` sprawdza połączenie z bazą i migracje.
+Endpoint `POST /check` ma walidację wejścia i kontrakt odpowiedzi, ale samo
+sprawdzanie informacji zwraca jeszcze `501 Not Implemented`. Nie ma jeszcze
+wyszukiwania dowodów ani werdyktów. Endpoint `/health` potwierdza tylko
+działanie procesu API; `/health/ready` sprawdza połączenie z bazą i migracje.
 
 ## Uruchomienie lokalne
 
@@ -27,8 +29,8 @@ jakimkolwiek udostępnieniem usług należy ustawić własne hasła i zabezpiecz
 konfigurację.
 
 - Interfejs: http://localhost:3000
-- API: http://localhost:8000/health
-- Dokumentacja API: http://localhost:8000/docs
+- API: http://localhost:8001/health
+- Dokumentacja API: http://localhost:8001/docs
 
 Zatrzymanie: `docker compose --env-file .env -f deploy/compose.yaml down`.
 Dane PostgreSQL są przechowywane w wolumenie Dockera.
@@ -43,6 +45,43 @@ docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.ca.yaml 
 
 Certyfikat nie jest zapisywany w obrazie. Plik override jest potrzebny tylko
 w środowiskach wymagających dodatkowego CA.
+
+## Lokalna autoryzacja konta X
+
+API obsługuje OAuth 2.0 Authorization Code z PKCE (S256) dla konta
+`@prawdowid`. To autoryzacja konta, **nie uruchomiony odbiornik DM ani bot
+fact-checkujący**.
+
+1. W X Developer Console skonfiguruj aplikację jako „Web app, automated app
+   or bot”. Włącz dostęp do odczytu i wysyłania DM.
+2. W prywatnym `.env` ustaw `X_CLIENT_ID`, `X_CLIENT_SECRET` i
+   `X_REDIRECT_URI=http://127.0.0.1:8001/auth/x/callback`. Ten sam callback
+   wpisz w konsoli X. Jeśli zmieniasz `API_PORT`, zmień port w obu callbackach.
+   W `.env.example` klucze muszą pozostać puste.
+3. Przebuduj i uruchom API: `docker compose --env-file .env -f deploy/compose.yaml up -d --build api`.
+   Zachowaj dodatkowe pliki Compose z CA, jeżeli ich używasz.
+4. W profilu przeglądarki zalogowanym jako `@prawdowid` otwórz
+   http://127.0.0.1:8001/auth/x i kliknij „Autoryzuj @prawdowid na X”.
+   Używaj tego samego hosta co w callbacku, nie zamieniaj `127.0.0.1` na
+   `localhost`. Zatwierdź zgodę na X.
+
+Backend sprawdza jednorazowy `state`, powiązanie z ciasteczkiem przeglądarki,
+ważność 10 minut, przyznane uprawnienia i nazwę konta przez `/2/users/me`.
+Zgoda innego konta nie zastąpi zapisanej autoryzacji. Scopes:
+`dm.read dm.write tweet.read users.read offline.access`. Dostęp do X API
+jest płatny; odczyt tożsamości konta również może zużyć kredyty.
+
+Token dostępu i refresh token są zapisane atomowo w pliku o uprawnieniach
+`0600`, w wolumenie `x_auth_data` (bez szyfrowania na dysku). Nie dodawaj
+tokenów do Gita ani nie udostępniaj wolumenu. Poza Dockerem plik znajduje
+się w `~/.local/share/prawdowid/x-oauth.json`. `/auth/x/status` pokazuje
+wyłącznie nazwę konta i czas wygaśnięcia, nigdy tokeny. Odświeżanie tokenów
+i odbieranie/wysyłanie DM będą kolejnym etapem.
+
+API w Compose nasłuchuje tylko na loopback i ma wyłączony access log, aby
+nie zapisywać kodów OAuth z callbacka. Nie wystawiaj tych endpointów
+publicznie bez dodatkowego uwierzytelnienia. Oczekujące autoryzacje są
+przechowywane w pamięci jednego procesu API; po restarcie zacznij nową.
 
 ## Baza danych
 
@@ -103,13 +142,18 @@ prawdziwej bazy z `DATABASE_URL`; bez dostępnej bazy są pomijane.
 - `apps/backend/src/prawdowid/ai/adapters` — osobne kontrakty LLM, decyzji i embeddingów.
 - `apps/backend/src/prawdowid/ai/instances` — implementacje Gemini i Jev.
 - `apps/backend/tests` — testy backendu.
-- `data/sources` — miejsce na przyszły katalog źródeł.
+- `data/sources/catalog.toml` — katalog źródeł do zasilania korpusu.
+- `data/sources/api` — statusy API/RSS dla adresów z `links.md` i instrukcje uruchomienia.
 - `deploy` — konfiguracja uruchomienia.
 
-Workery są osobnymi procesami Celery nasłuchującymi kolejek `fetch`, `claims`,
-`search`, `evidence`, `aggregate` i `ingestion`. Kolejki są przygotowane, ale
-zadania nie zostały jeszcze zaimplementowane. Przykład zwiększenia liczby
-workerów wyszukiwania:
+### Workery
+
+Workery Celery nasłuchują osobnych kolejek. Zaimplementowane są zadania
+zasilania korpusu (`ingestion`) i tworzenia embeddingów (`embedding`);
+`fetch`, `claims`, `search`, `evidence` i `aggregate` nie mają jeszcze zadań.
+Szczegóły uruchamiania API i RSS z listy źródeł są w [katalogu API](data/sources/api/README.md).
+
+Przykład zwiększenia liczby workerów wyszukiwania:
 
 ```bash
 docker compose --env-file .env -f deploy/compose.yaml up -d --scale worker-search=2

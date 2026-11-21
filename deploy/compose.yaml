@@ -68,6 +68,12 @@ services:
       context: ../apps/backend
     environment:
       DATABASE_URL: *database_url
+      X_CLIENT_ID: ${X_CLIENT_ID:-}
+      X_CLIENT_SECRET: ${X_CLIENT_SECRET:-}
+      X_REDIRECT_URI: ${X_REDIRECT_URI:-http://127.0.0.1:8000/auth/x/callback}
+    command: ["uvicorn", "prawdowid.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    volumes:
+      - x_auth_data:/home/app/.local/share/prawdowid
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -113,3 +119,4 @@ services:
 
 volumes:
   postgres_data:
+  x_auth_data:
