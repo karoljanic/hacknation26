@@ -10,7 +10,9 @@ Only claims with at least one evidence item go into the batched call.
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from prawdowid.ai.adapters.llm import LLMAdapter, StructuredResult
 from prawdowid.domain.evidence import (
@@ -64,6 +66,17 @@ is general knowledge. Never do this when general_knowledge_allowed is false,
 nor for anything disputed, recent or uncertain: use insufficient_evidence. When
 evidence settles the claim, base the verdict on it with basis "evidence".
 
+Time and dates. "today" is the current date: reason about the present as of
+today. Every evidence item describes the situation at its published_at date,
+which may have changed since: do not confirm a claim about the current state
+("teraz", "obecnie", "aktualnie", "od jutra", present tense) from old evidence
+alone, and say how old the evidence is when it matters. Relative dates in a
+claim ("wczoraj", "jutro", "w zeszłym tygodniu") refer to when the message was
+written, which is unknown unless stated: never assume it was today. Dates,
+years and periods in the evidence must match the claim's; a fact true for one
+year or period is not proof for another. Name concrete dates in the
+explanation when they matter (e.g. "według danych z 2023 r.").
+
 Absence is not refutation. That an evidence item does not mention something
 (a number, a name, an event) never makes a claim false or misleading: other
 documents may contain it. "refutes" requires a quote that states the contrary;
@@ -101,7 +114,7 @@ conflicts) derived from the evidence, not a general impression.
 explanation and limitations are read by the person who asked; write to them
 directly, in simple Polish for a citizen without technical background (you may
 address them as "Ty"). Start the explanation with the answer itself: "Tak.",
-"Nie.", "Częściowo." or "Nie wiadomo." for a question, otherwise what is true,
+"Nie.", "Częściowo." or "Nie wiem." for a question, otherwise what is true,
 then why, naming the source (e.g. "Według Demagoga...", "MSZ podaje...").
 Never describe the evidence-gathering process or what the supplied materials
 are about ("dostarczone materiały", "przedstawione dowody", "w zestawieniu
@@ -111,6 +124,14 @@ optionally adding what kind of source would settle it; do not list unrelated
 topics the materials covered. Keep the explanation to 1-3 sentences.
 limitations: only a real caveat the asker should know (e.g. data from 2023,
 only an announcement); otherwise leave it empty.
+
+When you are not sure, say so: use insufficient_evidence and start with "Nie
+wiem."; never guess and never lean towards "Tak" or "Nie" without a citation.
+When the claim lacks details needed to check it (who, when, where, which
+document or event; see missing_details_hint from claim extraction), start with
+"Nie wiem – potrzebuję więcej szczegółów." and list in missing_details 1-3
+short questions to the asker (e.g. "Kiedy dostałeś tę wiadomość?", "O który
+bank chodzi?"). missing_details stays empty for any other verdict.
 """
 
 
@@ -184,7 +205,7 @@ def _correct_announcement_confirmation(
                 for c in assessment.citations
             ],
             "explanation": (
-                f"Nie wiadomo. Zapowiadano to wydarzenie („{supporting[0].quote}”), "
+                f"Nie wiem. Zapowiadano to wydarzenie („{supporting[0].quote}”), "
                 "ale nie mam informacji, czy faktycznie się odbyło."
             ),
             "limitations": "Zapowiedź nie potwierdza, że wydarzenie się odbyło.",
@@ -193,7 +214,17 @@ def _correct_announcement_confirmation(
 
 
 GENERAL_KNOWLEDGE_NOTE = "Nie znalazłem źródła – to odpowiedź z wiedzy ogólnej. Warto sprawdzić ją samodzielnie."
-NO_INFORMATION = "Nie znalazłem wiarygodnych informacji na ten temat."
+NO_INFORMATION = "Nie wiem. Nie znalazłem wiarygodnych informacji na ten temat."
+NEEDS_DETAILS = "Nie wiem – potrzebuję więcej szczegółów, żeby to sprawdzić."
+MAX_MISSING_DETAILS = 3
+
+
+def _clarification(assessment: ClaimAssessmentOutput) -> ClaimAssessmentOutput:
+    """Asking the user to clarify only makes sense when there is no verdict."""
+    if assessment.verdict != "insufficient_evidence":
+        return assessment.model_copy(update={"missing_details": []}) if assessment.missing_details else assessment
+    details = [detail.strip() for detail in assessment.missing_details if detail.strip()][:MAX_MISSING_DETAILS]
+    return assessment.model_copy(update={"missing_details": details})
 
 
 def _enforce_basis(bundle: ClaimEvidenceBundle, assessment: ClaimAssessmentOutput) -> ClaimAssessmentOutput:
@@ -230,6 +261,10 @@ def _enforce_basis(bundle: ClaimEvidenceBundle, assessment: ClaimAssessmentOutpu
             ),
         }
     )
+
+
+def _today() -> date:
+    return datetime.now(ZoneInfo("Europe/Warsaw")).date()
 
 
 VALIDATION_ATTEMPTS = 2
@@ -275,9 +310,12 @@ def _validate_citations(bundle: ClaimEvidenceBundle, assessment: ClaimAssessment
 
 
 class AssessmentGenerator:
-    def __init__(self, *, llm: LLMAdapter, max_claims: int = MAX_CLAIMS_PER_CALL) -> None:
+    def __init__(
+        self, *, llm: LLMAdapter, max_claims: int = MAX_CLAIMS_PER_CALL, today: Callable[[], date] = _today
+    ) -> None:
         self.llm = llm
         self.max_claims = max_claims
+        self.today = today
 
     def assess(self, bundles: Sequence[ClaimEvidenceBundle]) -> StructuredResult[SubmissionAssessmentOutput]:
         if not bundles:
@@ -290,12 +328,14 @@ class AssessmentGenerator:
 
         prompt = json.dumps(
             {
+                "today": self.today().isoformat(),
                 "claims": [
                     {
                         "claim_id": bundle.claim_id,
                         "text": bundle.claim_text,
                         "kind": bundle.claim_kind,
                         "general_knowledge_allowed": bundle.general_knowledge_allowed,
+                        "missing_details_hint": bundle.ambiguities,
                         "evidence": [
                             {
                                 "index": index,
@@ -338,13 +378,13 @@ class AssessmentGenerator:
         if set(assessed_ids) != set(by_id) or len(assessed_ids) != len(by_id):
             raise RuntimeError("Model did not assess exactly the submitted claims")
         result.data.assessments = [
-            _enforce_basis(
+            _clarification(_enforce_basis(
                 by_id[assessment.claim_id],
                 _correct_announcement_confirmation(
                     by_id[assessment.claim_id],
                     _correct_euvsdisinfo_confirmation(by_id[assessment.claim_id], assessment),
                 ),
-            )
+            ))
             for assessment in result.data.assessments
         ]
         for assessment in result.data.assessments:
@@ -358,6 +398,27 @@ class AssessmentGenerator:
                 raise RuntimeError("Injection note excerpt absent from its evidence text")
             note.excerpt = verbatim
         return result
+
+
+OPEN_QUESTION_MESSAGE = (
+    "Sprawdzam tylko, czy informacja jest prawdziwa, czy fałszywa. Zadaj pytanie, na które da się "
+    "odpowiedzieć „tak” lub „nie”, np. zamiast „Kiedy była bitwa pod Grunwaldem?” zapytaj "
+    "„Czy bitwa pod Grunwaldem była w 1410 roku?”."
+)
+
+
+def open_question_assessment(claim: ClaimForVerification) -> ClaimAssessmentOutput:
+    """Deterministic result for questions asking for information: out of a
+    true/false checker's scope, so the user is asked to rephrase."""
+    return ClaimAssessmentOutput(
+        claim_id=claim.id,
+        verdict="unverifiable",
+        strength="weak",
+        reasons=AssessmentReasons(source_tiers=[], independent_sources=0, conflicting_sources=False),
+        explanation=OPEN_QUESTION_MESSAGE,
+        limitations=None,
+        citations=[],
+    )
 
 
 def opinion_assessment(claim: ClaimForVerification) -> ClaimAssessmentOutput:
@@ -395,7 +456,8 @@ def no_evidence_assessment(claim: ClaimForVerification, *, unavailable_sources: 
         verdict="insufficient_evidence",
         strength="weak",
         reasons=AssessmentReasons(source_tiers=[], independent_sources=0, conflicting_sources=False),
-        explanation=NO_INFORMATION,
+        explanation=NEEDS_DETAILS if claim.ambiguities else NO_INFORMATION,
         limitations=limitations,
         citations=[],
+        missing_details=list(claim.ambiguities[:MAX_MISSING_DETAILS]),
     )

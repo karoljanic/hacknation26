@@ -36,6 +36,9 @@ class ClaimForVerification(BaseModel):
     search_queries: list[str] = Field(default_factory=list)
     countries: list[str] = Field(default_factory=list)
     general_knowledge: bool = False
+    # Details extraction found missing (who, when, where, which document).
+    ambiguities: list[str] = Field(default_factory=list)
+    open_question: bool = False
 
 
 class EvidenceItem(BaseModel):
@@ -99,6 +102,7 @@ class ClaimEvidenceBundle(BaseModel):
     # Empty only for a general-knowledge claim nothing was found for.
     evidence: list[EvidenceForAssessment]
     general_knowledge_allowed: bool = False
+    ambiguities: list[str] = Field(default_factory=list)
 
 
 # -- final assessment output (one structured LLM call) ----------------------- #
@@ -153,6 +157,10 @@ class ClaimAssessmentOutput(BaseModel):
     explanation: str = Field(min_length=1, description="Krótkie uzasadnienie po polsku, prostym językiem.")
     limitations: str | None = Field(default=None, description="Ograniczenia odpowiedzi i źródeł.")
     citations: list[EvidenceCitation]
+    missing_details: list[str] = Field(
+        default_factory=list,
+        description="Tylko przy insufficient_evidence: czego pytający musi doprecyzować (krótkie pytania do niego).",
+    )
 
 
 class SubmissionAssessmentOutput(BaseModel):

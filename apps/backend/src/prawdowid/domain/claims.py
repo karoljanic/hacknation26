@@ -78,6 +78,9 @@ class Claim(BaseModel):
     # Established, time-independent fact of history, geography, science or
     # mathematics; only such claims may be answered from general knowledge.
     general_knowledge: bool = False
+    # A question asking for information ("Kiedy...?", "Ile...?") rather than
+    # whether a statement is true: outside a true/false checker's scope.
+    open_question: bool = False
 
     @field_validator("id", "text")
     @classmethod

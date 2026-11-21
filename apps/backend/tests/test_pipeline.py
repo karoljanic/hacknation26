@@ -17,6 +17,7 @@ from prawdowid.domain.evidence import (
 )
 from prawdowid.persistence.models import VerificationRun
 from prawdowid.services.intake import IntakeResult, StoredClaim
+from prawdowid.services.claim_selection import ClaimSelection
 from prawdowid.services.pipeline import VerificationPipeline
 
 
@@ -176,6 +177,87 @@ def test_general_knowledge_claim_without_evidence_still_reaches_the_model() -> N
     bundle = assessment.assess.call_args.args[0][0]
     assert bundle.evidence == [] and bundle.general_knowledge_allowed is True
     assert result.claims[0].assessment.reasons.basis == "general_knowledge"
+
+
+def test_side_claims_are_skipped_and_reported_and_selector_outage_keeps_the_first_ones() -> None:
+    run_id = uuid.uuid4()
+    ids = [uuid.uuid4() for _ in range(5)]
+    intake = Mock()
+    intake.submit_text.return_value = intake_result(
+        RunStatus.OK, [stored(claim_id, f"Teza {i}.") for i, claim_id in enumerate(ids)], run_id=run_id
+    )
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(
+        side_effect=lambda claims: EvidenceSearchResult(
+            claims=[ClaimEvidence(claim_id=claim.id, items=[]) for claim in claims], skipped_opinion_ids=[]
+        )
+    )
+    selector = Mock(max_claims=2)
+    selector.select.return_value = ClaimSelection(
+        selected=[str(ids[3])], skipped=[str(ids[i]) for i in (0, 1, 2, 4)]
+    )
+    pipeline = VerificationPipeline(
+        intake=intake, evidence_search=evidence_search, sublinks=Mock(), assessment=Mock(),
+        claim_selector=selector,
+    )
+    intake.session_factory = lambda: FakeSession({run_id: VerificationRun(id=run_id, status=RunStatus.RUNNING, pipeline_version="t")})
+
+    result = asyncio.run(pipeline.run_text("Długa wiadomość.", channel=Channel.WEB))
+
+    assert [outcome.text for outcome in result.claims] == ["Teza 3."]
+    assert result.skipped_claims == ["Teza 0.", "Teza 1.", "Teza 2.", "Teza 4."]
+    assert [claim.id for claim in evidence_search.search.call_args.args[0]] == [str(ids[3])]
+
+    selector.select.side_effect = RuntimeError("decision outage")
+    result = asyncio.run(pipeline.run_text("Długa wiadomość.", channel=Channel.WEB))
+
+    assert result.status == RunStatus.OK
+    assert [outcome.text for outcome in result.claims] == ["Teza 0.", "Teza 1."]
+    assert len(result.skipped_claims) == 3
+
+
+def test_only_open_questions_ask_the_user_to_rephrase_without_searching() -> None:
+    run_id, claim_id = uuid.uuid4(), uuid.uuid4()
+    run = VerificationRun(id=run_id, status=RunStatus.OK, pipeline_version="t")
+    intake = Mock()
+    question = dataclasses.replace(
+        stored(claim_id, "Kiedy była bitwa pod Grunwaldem?", ClaimKind.VERIFICATION_QUESTION), open_question=True
+    )
+    intake.submit_text.return_value = intake_result(RunStatus.OK, [question], run_id=run_id)
+    evidence_search = Mock()
+    pipeline = make_pipeline(run=run, intake=intake, evidence_search=evidence_search)
+
+    result = asyncio.run(pipeline.run_text("Kiedy była bitwa pod Grunwaldem?", channel=Channel.WEB, question=True))
+
+    assert result.status == RunStatus.NEEDS_CLARIFICATION
+    assert "„tak” lub „nie”" in result.message
+    assert run.status == RunStatus.NEEDS_CLARIFICATION
+    evidence_search.search.assert_not_called()
+
+
+def test_open_question_next_to_a_checkable_claim_is_answered_deterministically() -> None:
+    run_id, open_id, claim_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    intake = Mock()
+    question = dataclasses.replace(
+        stored(open_id, "Dlaczego to zrobili?", ClaimKind.VERIFICATION_QUESTION), open_question=True
+    )
+    intake.submit_text.return_value = intake_result(
+        RunStatus.OK, [question, stored(claim_id, "Rząd podniósł VAT.")], run_id=run_id
+    )
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(
+        return_value=EvidenceSearchResult(claims=[ClaimEvidence(claim_id=str(claim_id), items=[])], skipped_opinion_ids=[])
+    )
+    pipeline = make_pipeline(
+        run=VerificationRun(id=run_id, status=RunStatus.RUNNING, pipeline_version="t"),
+        intake=intake, evidence_search=evidence_search,
+    )
+
+    result = asyncio.run(pipeline.run_text("Rząd podniósł VAT. Dlaczego to zrobili?", channel=Channel.WEB))
+
+    assert [claim.id for claim in evidence_search.search.call_args.args[0]] == [str(claim_id)]
+    verdicts = {outcome.text: outcome.assessment.verdict for outcome in result.claims}
+    assert verdicts == {"Dlaczego to zrobili?": "unverifiable", "Rząd podniósł VAT.": "insufficient_evidence"}
 
 
 def test_claim_with_evidence_goes_through_sublinks_and_assessment() -> None:

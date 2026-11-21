@@ -16,7 +16,7 @@ export default function Home() {
         <article className="content">
           <h1>Sprawdź informację</h1>
           <p className="lead">
-            Wklej treść albo link, który budzi Twoje wątpliwości. Narzędzie wskaże, co mówią na ten
+            Wklej treść albo link, który budzi Twoje wątpliwości, lub zadaj pytanie. Narzędzie wskaże, co mówią na ten
             temat wiarygodne źródła, i pokaże, na jakiej podstawie udzieliło odpowiedzi.
           </p>
           <CheckForm />
@@ -25,7 +25,7 @@ export default function Home() {
         <aside className="sidebar" aria-labelledby="how-it-works">
           <h2 id="how-it-works">Jak to działa</h2>
           <ol className="steps">
-            <li>Wklejasz treść lub link.</li>
+            <li>Wklejasz treść lub link albo zadajesz pytanie.</li>
             <li>Narzędzie wyodrębnia twierdzenia, które da się sprawdzić.</li>
             <li>Porównuje je z dokumentami urzędowymi, danymi publicznymi i weryfikacjami fact-checkerów.</li>
             <li>Pokazuje wynik, uzasadnienie i źródła. Gdy dowodów brakuje, mówi o tym wprost.</li>

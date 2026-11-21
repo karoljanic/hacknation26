@@ -30,7 +30,7 @@ from prawdowid.domain.preparation import PreparedInput
 from prawdowid.persistence import claims as claim_repo
 from prawdowid.persistence.models import Claim, Submission, SubmissionClaim, VerificationRun
 from prawdowid.security.redaction import redact
-from prawdowid.services.claims import ClaimExtractor
+from prawdowid.services.claims import ClaimExtractor, is_open_question
 from prawdowid.services.preparation import InputPreparer, NoExtractableContentError
 
 PIPELINE_VERSION = "intake-0.1"
@@ -60,6 +60,8 @@ class StoredClaim:
     search_queries: tuple[str, ...] = ()
     countries: tuple[str, ...] = ()
     general_knowledge: bool = False
+    ambiguities: tuple[str, ...] = ()
+    open_question: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,8 @@ class IntakeResult:
     status: RunStatus
     claims: list[StoredClaim] = field(default_factory=list)
     message: str | None = None  # user-facing reason for a non-OK status
+    # Redacted submission text the claims came from (context for later steps).
+    input_text: str = ""
 
 
 class ClaimIntake:
@@ -176,7 +180,8 @@ class ClaimIntake:
         stored = self._store_claims(submission_id, extraction, embeddings)
         result = self._close(submission_id, run_id, started, models, RunStatus.OK, None,
                              redacted_text=redacted_text)
-        return IntakeResult(submission_id, run_id, result.status, stored)
+        input_text = "\n\n".join(segment.text for segment in prepared.segments)
+        return IntakeResult(submission_id, run_id, result.status, stored, input_text=input_text)
 
     @staticmethod
     def _redact_segments(prepared: PreparedInput) -> PreparedInput:
@@ -272,6 +277,9 @@ class ClaimIntake:
                         search_queries=tuple(extracted.search_queries),
                         countries=tuple(extracted.countries),
                         general_knowledge=extracted.general_knowledge,
+                        ambiguities=tuple(extracted.ambiguities),
+                        open_question=kind == ClaimKind.VERIFICATION_QUESTION
+                        and (extracted.open_question or is_open_question(extracted.text)),
                     )
                 )
         return stored

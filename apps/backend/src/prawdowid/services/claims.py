@@ -30,8 +30,26 @@ For each factual_claim and verification_question also give:
   Grunwald, the height of Mount Everest, the boiling point of water). false for
   anything about current or recent events, people's statements, policies,
   prices, current statistics, rankings or anything that can change.
+- open_question: true for a verification_question that asks for information
+  (who, what, when, where, how many, why, which) instead of whether a specific
+  statement is true, e.g. "Kiedy była bitwa pod Grunwaldem?"; false for yes/no
+  questions such as "Czy bitwa pod Grunwaldem była w 1410 roku?". Keep an open
+  question as asked; do not turn it into a yes/no claim.
 Leave these empty or false for opinions.
 """
+
+
+_OPEN_QUESTION_WORDS = frozenset(
+    "kto kogo komu kim co czego czemu czym kiedy gdzie skąd dokąd dlaczego jak jaki jaka jakie jakiego "
+    "jakiej jakim jakich który która które którego której którym ile ilu czyj czyja czyje".split()
+)
+
+
+def is_open_question(text: str) -> bool:
+    """A question starting with an interrogative word other than "czy" asks for
+    information, not for a true/false check."""
+    words = text.strip().split(maxsplit=1)
+    return bool(words) and text.rstrip().endswith("?") and words[0].strip("„\"'(").casefold() in _OPEN_QUESTION_WORDS
 
 
 class ClaimExtractor:

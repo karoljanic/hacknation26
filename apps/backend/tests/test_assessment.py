@@ -1,3 +1,4 @@
+from datetime import date
 from unittest.mock import Mock
 
 import pytest
@@ -292,7 +293,7 @@ def test_past_event_confirmed_only_by_an_announcement_becomes_insufficient_evide
     assessment = result.data.assessments[0]
     assert assessment.verdict == "insufficient_evidence"
     assert assessment.citations[0].relation == "adds_context"
-    assert assessment.explanation.startswith("Nie wiadomo.")
+    assert assessment.explanation.startswith("Nie wiem.")
 
 
 def test_confirming_that_an_event_was_announced_is_left_alone() -> None:
@@ -343,7 +344,7 @@ def test_general_knowledge_is_refused_for_claims_not_marked_as_such() -> None:
 
     assert assessment.verdict == "insufficient_evidence"
     assert assessment.reasons.basis == "evidence"
-    assert assessment.explanation == "Nie znalazłem wiarygodnych informacji na ten temat."
+    assert assessment.explanation == "Nie wiem. Nie znalazłem wiarygodnych informacji na ten temat."
 
 
 def test_uncited_verdict_with_nothing_to_cite_is_treated_as_general_knowledge() -> None:
@@ -354,3 +355,44 @@ def test_uncited_verdict_with_nothing_to_cite_is_treated_as_general_knowledge() 
 
     assert assessment.reasons.basis == "general_knowledge"
     assert assessment.strength == "weak"
+
+
+def test_missing_details_are_kept_only_when_there_is_no_verdict() -> None:
+    llm = Mock()
+    llm.generate_structured.return_value = output(missing_details=["Kiedy dostałeś tę wiadomość?"])
+
+    assessment = AssessmentGenerator(llm=llm).assess([bundle()]).data.assessments[0]
+
+    assert assessment.verdict == "false"
+    assert assessment.missing_details == []
+
+    llm.generate_structured.return_value = output(
+        verdict="insufficient_evidence", strength="weak", citations=[],
+        explanation="Nie wiem – potrzebuję więcej szczegółów.",
+        missing_details=["Kiedy dostałeś tę wiadomość?", " ", "O który bank chodzi?", "Gdzie?", "Kto?"],
+    )
+
+    assessment = AssessmentGenerator(llm=llm).assess([bundle()]).data.assessments[0]
+
+    assert assessment.missing_details == ["Kiedy dostałeś tę wiadomość?", "O który bank chodzi?", "Gdzie?"]
+
+
+def test_no_evidence_with_missing_details_asks_the_user_to_clarify() -> None:
+    claim = ClaimForVerification(
+        id="c1", text="Banki już blokują konta.", kind="factual_claim",
+        ambiguities=["Nie sprecyzowano, o które banki chodzi."],
+    )
+
+    assessment = no_evidence_assessment(claim)
+
+    assert assessment.explanation.startswith("Nie wiem")
+    assert assessment.missing_details == ["Nie sprecyzowano, o które banki chodzi."]
+
+
+def test_prompt_states_today_so_the_model_can_reason_about_the_present() -> None:
+    llm = Mock()
+    llm.generate_structured.return_value = output()
+
+    AssessmentGenerator(llm=llm, today=lambda: date(2026, 11, 21)).assess([bundle()])
+
+    assert '"today": "2026-11-21"' in llm.generate_structured.call_args.args[0]

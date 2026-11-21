@@ -503,6 +503,42 @@ textarea.input {
   padding: 0.25rem 0;
 }
 
+.missing-details {
+  margin: 0.75rem 0;
+  padding: 0.75rem 1rem;
+  background: var(--color-info-bg);
+  border-left: 4px solid var(--color-primary);
+}
+
+.missing-details__title {
+  margin: 0 0 0.25rem;
+  font-weight: 700;
+}
+
+.missing-details ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.skipped-claims {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: 0.9375rem;
+}
+
+.skipped-claims summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.skipped-claims ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+  color: var(--color-muted);
+}
+
 .basis-badge {
   display: inline-block;
   padding: 0.15rem 0.5rem;

@@ -3,7 +3,9 @@
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 
 // Mirrors the backend's POST /check contract (apps/backend/src/prawdowid/api/check.py).
-type InputType = "text" | "question" | "url" | "image" | "video";
+// The API also accepts "question"; the form sends questions as text, since
+// claim extraction tells statements and questions apart on its own.
+type InputType = "text" | "url" | "image" | "video";
 
 type ClaimKind = "factual_claim" | "verification_question" | "opinion";
 type Verdict = "confirmed" | "false" | "misleading" | "insufficient_evidence" | "unverifiable";
@@ -21,9 +23,16 @@ type Claim = {
   limitations: string | null;
   basis: "evidence" | "general_knowledge";
   sources: Source[];
+  missing_details?: string[];
 };
 
-type CheckResponse = { run_id: string; status: RunStatus; message: string | null; claims: Claim[] };
+type CheckResponse = {
+  run_id: string;
+  status: RunStatus;
+  message: string | null;
+  claims: Claim[];
+  skipped_claims?: string[];
+};
 
 const MAX_FILE_BYTES = 12_000_000;
 
@@ -33,9 +42,8 @@ const ACCEPT: Record<"image" | "video", string[]> = {
 };
 
 const OPTIONS: { value: InputType; label: string; hint: string }[] = [
-  { value: "text", label: "Tekst", hint: "wiadomość, wpis, cytat" },
+  { value: "text", label: "Tekst lub pytanie", hint: "wiadomość, wpis, cytat, pytanie" },
   { value: "url", label: "Link", hint: "artykuł, wpis, nagranie" },
-  { value: "question", label: "Pytanie", hint: "zadaj pytanie" },
   { value: "image", label: "Zdjęcie", hint: "zdjęcie lub zrzut ekranu" },
   { value: "video", label: "Wideo", hint: "nagranie wideo" },
 ];
@@ -75,7 +83,7 @@ type State =
   | { kind: "busy"; message: string; retryAfter: number | null }
   | { kind: "invalid"; message: string }
   | { kind: "error"; message: string }
-  | { kind: "done"; message: string | null; claims: Claim[] };
+  | { kind: "done"; message: string | null; claims: Claim[]; skipped: string[] };
 
 function formatSize(bytes: number): string {
   if (bytes < 1_000_000) return `${Math.max(1, Math.round(bytes / 1000))} kB`;
@@ -101,7 +109,7 @@ type Draft = { text: string; url: string; file: File | null };
 const EMPTY_DRAFT: Draft = { text: "", url: "", file: null };
 
 function emptyDrafts(): Record<InputType, Draft> {
-  return { text: EMPTY_DRAFT, question: EMPTY_DRAFT, url: EMPTY_DRAFT, image: EMPTY_DRAFT, video: EMPTY_DRAFT };
+  return { text: EMPTY_DRAFT, url: EMPTY_DRAFT, image: EMPTY_DRAFT, video: EMPTY_DRAFT };
 }
 
 export function CheckForm() {
@@ -201,7 +209,12 @@ export function CheckForm() {
 
       switch (payload.status) {
         case "ok":
-          setState({ kind: "done", message: payload.message ?? null, claims: payload.claims ?? [] });
+          setState({
+            kind: "done",
+            message: payload.message ?? null,
+            claims: payload.claims ?? [],
+            skipped: payload.skipped_claims ?? [],
+          });
           break;
         case "needs_clarification":
           setState({ kind: "needs-clarification", message: payload.message ?? null });
@@ -219,17 +232,15 @@ export function CheckForm() {
   }
 
   const textLabel =
-    type === "text" ? "Treść do sprawdzenia" : type === "question" ? "Twoje pytanie" : "Pytanie (opcjonalnie)";
+    type === "text" ? "Treść lub pytanie do sprawdzenia" : "Pytanie (opcjonalnie)";
   const textHint =
     type === "text"
-      ? "Wklej wiadomość, wpis lub cytat. Nie podawaj danych osobowych."
-      : type === "question"
-        ? "Na przykład: Czy we Włoszech ostatnio odbywał się strajk generalny?"
-        : type === "image"
-          ? "Co dokładnie chcesz sprawdzić? Na przykład: Czy to zdjęcie jest aktualne?"
-          : type === "video"
-            ? "Co dokładnie chcesz sprawdzić? Na przykład: Czy to nagranie pokazuje tegoroczny protest?"
-            : "Co dokładnie chcesz sprawdzić? Na przykład: Czy ten artykuł podaje prawdziwe dane?";
+      ? "Wklej wiadomość, wpis lub cytat albo zadaj pytanie, na które da się odpowiedzieć „tak” lub „nie”, np. „Czy we Włoszech ostatnio odbywał się strajk generalny?”. Nie podawaj danych osobowych."
+      : type === "image"
+        ? "Co dokładnie chcesz sprawdzić? Na przykład: Czy to zdjęcie jest aktualne?"
+        : type === "video"
+          ? "Co dokładnie chcesz sprawdzić? Na przykład: Czy to nagranie pokazuje tegoroczny protest?"
+          : "Co dokładnie chcesz sprawdzić? Na przykład: Czy ten artykuł podaje prawdziwe dane?";
 
   return (
     <>
@@ -320,7 +331,7 @@ export function CheckForm() {
             id={`${ids}-text`}
             rows={type === "text" ? 5 : 3}
             maxLength={5000}
-            required={type === "text" || type === "question"}
+            required={type === "text"}
             value={text}
             onChange={(event) => updateDraft({ text: event.target.value })}
             aria-describedby={`${ids}-text-hint`}
@@ -454,6 +465,19 @@ function Result({ state }: { state: State }) {
           {state.claims.map((claim, index) => (
             <ClaimResult key={`${claim.text}-${index}`} claim={claim} />
           ))}
+          {state.skipped.length > 0 && (
+            <details className="skipped-claims">
+              <summary>
+                Pominięte poboczne twierdzenia ({state.skipped.length}) – sprawdziłem tylko te kluczowe dla
+                Twojego pytania
+              </summary>
+              <ul>
+                {state.skipped.map((text, index) => (
+                  <li key={`${text}-${index}`}>{text}</li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       );
     default:
@@ -474,6 +498,16 @@ function ClaimResult({ claim }: { claim: Claim }) {
         )}
       </div>
       <p className="claim-result__explanation">{claim.explanation}</p>
+      {claim.missing_details && claim.missing_details.length > 0 && (
+        <div className="missing-details">
+          <p className="missing-details__title">Doprecyzuj, aby to sprawdzić:</p>
+          <ul>
+            {claim.missing_details.map((detail, index) => (
+              <li key={`${detail}-${index}`}>{detail}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {claim.limitations && (
         <p className="claim-result__limitations">
           <strong>Ograniczenia:</strong> {claim.limitations}

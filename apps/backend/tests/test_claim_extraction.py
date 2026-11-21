@@ -9,7 +9,7 @@ from google.genai import types
 from prawdowid.ai.adapters.llm import LLMAdapter, StructuredResult
 from prawdowid.ai.instances.gemini import GeminiAdapter
 from prawdowid.domain.claims import Claim, ClaimExtraction, ClaimReference, InputSegment
-from prawdowid.services.claims import ClaimExtractor
+from prawdowid.services.claims import ClaimExtractor, is_open_question
 
 
 def extraction_result(claims: list[Claim]) -> StructuredResult[ClaimExtraction]:
@@ -152,3 +152,17 @@ def test_malformed_search_hints_from_the_model_are_cleaned_not_fatal() -> None:
 
     assert extracted.search_queries == ["strajk Włochy", "a", "b", "c"]
     assert extracted.countries == ["IT", "PL"]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Kiedy była bitwa pod Grunwaldem?", True),
+        ("Ile wynosi płaca minimalna?", True),
+        ("„Dlaczego Demagog podał 650 mln zł?", True),
+        ("Czy bitwa pod Grunwaldem była w 1410 roku?", False),
+        ("Kto by pomyślał, że Wisła jest najdłuższa.", False),
+    ],
+)
+def test_open_questions_are_recognised_by_their_interrogative_word(text: str, expected: bool) -> None:
+    assert is_open_question(text) is expected

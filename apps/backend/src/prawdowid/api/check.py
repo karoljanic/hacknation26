@@ -77,6 +77,10 @@ class ClaimResult(BaseModel):
         description="`general_knowledge`: odpowiedź z wiedzy ogólnej modelu, bez źródła (zawsze słaba).",
     )
     sources: list[Source] = Field(description="Źródła, na których oparto ocenę. Puste, gdy ich brak.")
+    missing_details: list[str] = Field(
+        default_factory=list,
+        description="Gdy brak werdyktu: co trzeba doprecyzować (kto, kiedy, gdzie), żeby dało się to sprawdzić.",
+    )
 
 
 class CheckResponse(BaseModel):
@@ -86,6 +90,10 @@ class CheckResponse(BaseModel):
     )
     message: str | None = Field(default=None, description="Komunikat dla użytkownika przy statusie innym niż `ok`.")
     claims: list[ClaimResult] = Field(default_factory=list)
+    skipped_claims: list[str] = Field(
+        default_factory=list,
+        description="Poboczne twierdzenia ze zgłoszenia, których nie sprawdzano (sprawdzane są tylko kluczowe).",
+    )
 
 
 class ErrorResponse(BaseModel):
@@ -158,6 +166,7 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
             explanation=outcome.assessment.explanation,
             limitations=outcome.assessment.limitations,
             basis=outcome.assessment.reasons.basis,
+            missing_details=outcome.assessment.missing_details,
             sources=[
                 Source(
                     title=outcome.evidence[citation.evidence_index].item.title,
@@ -173,7 +182,9 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
         )
         for outcome in result.claims
     ]
-    return CheckResponse(run_id=str(result.run_id), status=result.status, claims=claims)
+    return CheckResponse(
+        run_id=str(result.run_id), status=result.status, claims=claims, skipped_claims=result.skipped_claims
+    )
 
 
 # -- endpoint ---------------------------------------------------------------- #

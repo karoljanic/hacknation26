@@ -29,6 +29,7 @@ from prawdowid.persistence.models import EMBEDDING_DIM
 from prawdowid.services.assessment import AssessmentGenerator
 from prawdowid.adapters.sources.gov_api import GovPlSearchClient, OdyseuszClient
 from prawdowid.adapters.sources.wikipedia import WikipediaClient
+from prawdowid.services.claim_selection import ClaimSelector
 from prawdowid.services.claims import ClaimExtractor
 from prawdowid.services.evidence_search import EvidenceSearchOrchestrator
 from prawdowid.services.gov_connectors import GovConnectorSelector
@@ -95,5 +96,6 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
             sublinks = SublinkSelector(decision=decision, preparer=preparer)
             assessment = AssessmentGenerator(llm=GeminiAdapter(genai_client, ASSESSMENT_MODEL, thinking_level=THINKING_LEVEL))
             yield VerificationPipeline(
-                intake=intake, evidence_search=evidence_search, sublinks=sublinks, assessment=assessment
+                intake=intake, evidence_search=evidence_search, sublinks=sublinks, assessment=assessment,
+                claim_selector=ClaimSelector(decision=decision),
             )
