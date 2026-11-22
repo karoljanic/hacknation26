@@ -49,14 +49,14 @@ services:
       GEMINI_EXTRACTION_MODEL: ${GEMINI_EXTRACTION_MODEL:-}
       GEMINI_ASSESSMENT_MODEL: ${GEMINI_ASSESSMENT_MODEL:-}
       GEMINI_THINKING_LEVEL: ${GEMINI_THINKING_LEVEL:-LOW}
-      # Optional per-check cost estimate (see README, "Zapis zgłoszeń i tez").
+      # Optional per-check cost estimate (see docs/architektura.md).
       MODEL_PRICES_USD_PER_MTOK: ${MODEL_PRICES_USD_PER_MTOK:-}
-      # Request limits for POST /check (see README, "Limity żądań").
+      # Request limits for POST /check (see docs/ryzyka.md).
       CHECK_RATE_LIMIT_PER_MINUTE: ${CHECK_RATE_LIMIT_PER_MINUTE:-20}
       CHECK_RATE_LIMIT_PER_DAY: ${CHECK_RATE_LIMIT_PER_DAY:-300}
       CHECK_GLOBAL_LIMIT_PER_DAY: ${CHECK_GLOBAL_LIMIT_PER_DAY:-5000}
       CHECK_MAX_CONCURRENT: ${CHECK_MAX_CONCURRENT:-8}
-      # Prompt-injection guard on /check text fields (see README, "Ochrona przed prompt injection").
+      # Prompt-injection guard on /check text fields (see docs/ryzyka.md).
       INJECTION_JEV_THRESHOLD: ${INJECTION_JEV_THRESHOLD:-0.5}
       INJECTION_GUARDRAILS_THRESHOLD: ${INJECTION_GUARDRAILS_THRESHOLD:-0.81}
       CHECK_TRUST_FORWARDED_FOR: ${CHECK_TRUST_FORWARDED_FOR:-}
