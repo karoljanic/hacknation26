@@ -31,6 +31,7 @@ from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.enums import Channel, ClaimKind, RunStatus, Strength, Verdict
 from prawdowid.domain.preparation import PreparedInput
 from prawdowid.services.pipeline import PipelineResult, VerificationPipeline
+from prawdowid.services.social import social_link_message, social_platform
 from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES, VIDEO_TYPES, NoExtractableContentError
 from prawdowid.security.attestation import (
     SignableClaim,
@@ -95,6 +96,12 @@ class ClaimResult(BaseModel):
     )
 
 
+class MediaInfo(BaseModel):
+    description: str = Field(description="Krótki opis, co przedstawia obraz lub nagranie.")
+    text: str = Field(description="Cały tekst odczytany z obrazu lub nagrania, w kolejności czytania.")
+    text_complete: bool = Field(description="Fałsz, gdy część tekstu była ucięta, rozmazana lub nieczytelna.")
+
+
 class CheckResponse(BaseModel):
     run_id: str = Field(description="Identyfikator przebiegu sprawdzenia (zapis w bazie).")
     status: RunStatus = Field(
@@ -102,6 +109,7 @@ class CheckResponse(BaseModel):
     )
     message: str | None = Field(default=None, description="Komunikat dla użytkownika przy statusie innym niż `ok`.")
     claims: list[ClaimResult] = Field(default_factory=list)
+    media: MediaInfo | None = Field(default=None, description="Co odczytano z przesłanego obrazu lub nagrania.")
     skipped_claims: list[str] = Field(
         default_factory=list,
         description="Poboczne twierdzenia ze zgłoszenia, których nie sprawdzano (sprawdzane są tylko kluczowe).",
@@ -175,8 +183,9 @@ def _prepend_question(segments: list[InputSegment], question: str) -> list[Input
 
 
 def _to_check_response(result: PipelineResult) -> "CheckResponse":
+    media = MediaInfo(**result.media.model_dump()) if result.media is not None else None
     if result.status != RunStatus.OK:
-        return CheckResponse(run_id=str(result.run_id), status=result.status, message=result.message)
+        return CheckResponse(run_id=str(result.run_id), status=result.status, message=result.message, media=media)
     claims = [
         ClaimResult(
             text=outcome.text,
@@ -229,6 +238,7 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
         run_id=str(result.run_id),
         status=result.status,
         claims=claims,
+        media=media,
         skipped_claims=result.skipped_claims,
         answer_hash=answer_hash,
         signed_text=signed_text,
@@ -310,6 +320,11 @@ async def check(
             _HTTP_URL.validate_python(url)
         except ValidationError as exc:
             raise _invalid("Podany link jest nieprawidłowy.") from exc
+        platform = social_platform(url)
+        if platform is not None:
+            return CheckResponse(
+                run_id="", status=RunStatus.NEEDS_CLARIFICATION, message=social_link_message(platform)
+            )
     # `url` is ignored for other types (Swagger UI always pre-fills it).
 
     media: bytes | None = None
@@ -342,9 +357,17 @@ async def check(
                         prepared = preparer.prepare_url(url)  # type: ignore[arg-type]
                     else:
                         assert media is not None
-                        prepared = preparer.prepare_media(
-                            Media(data=media, mime_type=mime_type), source_name=source_name
-                        )
+                        try:
+                            prepared = preparer.prepare_media(
+                                Media(data=media, mime_type=mime_type), source_name=source_name
+                            )
+                        except NoExtractableContentError as exc:
+                            # A photo without text: the asker's question is all there is to check.
+                            if question is None:
+                                raise
+                            return preparer.prepare_text(question, question=True).model_copy(
+                                update={"media_description": exc.media_description, "media_text_complete": True}
+                            )
                     if question is not None:
                         prepared = prepared.model_copy(
                             update={"segments": _prepend_question(prepared.segments, question)}

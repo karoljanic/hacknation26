@@ -13,9 +13,9 @@ from prawdowid.api.check import MAX_TEXT_LENGTH, get_pipeline_factory
 from prawdowid.api.rate_limit import CheckGuard, CheckLimits, get_check_guard
 from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.enums import RunStatus
-from prawdowid.domain.preparation import PreparedInput
+from prawdowid.domain.preparation import MediaReadout, PreparedInput
 from prawdowid.services.pipeline import PipelineResult
-from prawdowid.services.preparation import MAX_MEDIA_BYTES
+from prawdowid.services.preparation import MAX_MEDIA_BYTES, InputPreparer, NoExtractableContentError
 
 client = TestClient(app)
 
@@ -205,6 +205,31 @@ def test_picture_without_question_is_accepted(stub_pipeline) -> None:
     assert post_check({"type": "image"}, ("a.png", PNG, "image/png")).status_code == 200
 
 
+def test_media_readout_is_returned(stub_pipeline) -> None:
+    media = MediaReadout(description="Zrzut ekranu wpisu.", text="Podatek nie wzrośnie.", text_complete=False)
+    stub_pipeline.run_deferred.side_effect = None
+    stub_pipeline.run_deferred.return_value = PipelineResult(uuid.uuid4(), uuid.uuid4(), RunStatus.OK, media=media)
+
+    body = post_check({"type": "image"}, ("a.png", PNG, "image/png")).json()
+
+    assert body["media"] == media.model_dump()
+
+
+def test_photo_without_text_falls_back_to_the_question(stub_pipeline) -> None:
+    stub_pipeline.intake.preparer.prepare_media.side_effect = NoExtractableContentError(
+        "no_content", media_description="Zdjęcie zamku."
+    )
+    stub_pipeline.intake.preparer.prepare_text.side_effect = lambda text, question=False: InputPreparer.prepare_text(
+        Mock(), text, question=question
+    )
+
+    post_check({"type": "image", "text": "Czy to zdjęcie przedstawia Wawel?"}, ("a.png", PNG, "image/png"))
+
+    segments = stub_pipeline.prepared_inputs[0].segments
+    assert [(segment.text, segment.origin) for segment in segments] == [("Czy to zdjęcie przedstawia Wawel?", "question")]
+    assert stub_pipeline.prepared_inputs[0].media_description == "Zdjęcie zamku."
+
+
 @pytest.mark.parametrize(
     ("form", "file", "expected_status"),
     [
@@ -339,3 +364,29 @@ def test_sources_include_their_publication_date(stub_pipeline) -> None:
     source = body["claims"][0]["sources"][0]
     assert source["published_at"].startswith("2026-03-01")
     assert {"title", "publisher", "url", "quote"} <= set(source)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://x.com/user/status/1",
+        "https://mobile.twitter.com/user/status/1",
+        "https://www.tiktok.com/@user/video/1",
+        "https://vm.tiktok.com/abc/",
+        "https://www.instagram.com/p/abc/",
+        "https://m.facebook.com/story.php?id=1",
+        "https://fb.watch/abc/",
+    ],
+)
+def test_social_media_link_asks_for_a_screenshot(url: str, stub_pipeline) -> None:
+    body = post_check({"type": "url", "url": url, "text": "Czy to prawda?"}).json()
+
+    assert body["status"] == "needs_clarification"
+    assert "zrzut ekranu" in body["message"]
+    stub_pipeline.run_url.assert_not_called()
+    stub_pipeline.run_deferred.assert_not_called()
+
+
+def test_lookalike_domain_is_not_treated_as_social_media(stub_pipeline) -> None:
+    post_check({"type": "url", "url": "https://notx.com/artykul"})
+    stub_pipeline.run_url.assert_called_once()

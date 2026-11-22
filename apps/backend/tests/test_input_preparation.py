@@ -12,8 +12,8 @@ from prawdowid.ai.adapters.llm import LLMAdapter, StructuredResult
 from prawdowid.ai.adapters.media import Media
 from prawdowid.ai.instances.gemini import GeminiAdapter
 from prawdowid.adapters.sources.web import ArticleFetcher, FetchedArticle
-from prawdowid.domain.claims import ClaimExtraction
-from prawdowid.domain.preparation import MediaFragment, MediaReading
+from prawdowid.domain.claims import ClaimExtraction, InputSegment
+from prawdowid.domain.preparation import MediaFragment, MediaReading, PreparedInput
 from prawdowid.services.claims import ClaimExtractor
 from prawdowid.services.preparation import MAX_MEDIA_BYTES, InputPreparer, NoExtractableContentError, extract_article, extract_document
 
@@ -117,6 +117,8 @@ def test_video_keeps_speech_and_on_screen_text_as_separate_segments() -> None:
     reading = MediaReading(
         status="extracted",
         reason="Timestamps are approximate.",
+        description="Nagranie wypowiedzi.",
+        text_complete=True,
         fragments=[
             fragment(),
             fragment(
@@ -154,7 +156,7 @@ def test_video_keeps_speech_and_on_screen_text_as_separate_segments() -> None:
 def test_invalid_media_provenance_is_rejected(
     mime_type: str, bad_fragment: MediaFragment, message: str
 ) -> None:
-    service = preparer(MediaReading(status="extracted", reason="", fragments=[bad_fragment]))
+    service = preparer(MediaReading(status="extracted", reason="", description="Zrzut ekranu.", text_complete=True, fragments=[bad_fragment]))
     with pytest.raises(RuntimeError, match=message):
         service.prepare_media(Media(data=b"test", mime_type=mime_type), source_name="test")
 
@@ -162,10 +164,18 @@ def test_invalid_media_provenance_is_rejected(
 @pytest.mark.parametrize("status", ["no_content", "unreadable"])
 def test_media_without_readable_text_has_explicit_error(status: str) -> None:
     service = preparer(
-        MediaReading.model_validate({"status": status, "reason": "No speech.", "fragments": []})
+        MediaReading.model_validate({"status": status, "reason": "No speech.", "description": "Cisza.", "text_complete": True, "fragments": []})
     )
     with pytest.raises(NoExtractableContentError, match=status):
         service.prepare_media(Media(data=b"test", mime_type="audio/wav"), source_name="test")
+
+
+def test_image_without_text_tells_the_user_to_ask() -> None:
+    service = preparer(MediaReading.model_validate({"status": "no_content", "reason": "A photo.", "description": "Zdjęcie morza.", "text_complete": True, "fragments": []}))
+    with pytest.raises(NoExtractableContentError) as error:
+        service.prepare_media(Media(data=b"test", mime_type="image/png"), source_name="test")
+    assert error.value.user_message is not None and "nie ma tekstu" in error.value.user_message
+    assert error.value.media_description == "Zdjęcie morza."
 
 
 @pytest.mark.parametrize(
@@ -184,7 +194,7 @@ def test_invalid_media_is_rejected_before_billable_call(media: Media) -> None:
 
 
 def test_media_at_size_limit_is_accepted() -> None:
-    service = preparer(MediaReading(status="extracted", reason="", fragments=[fragment()]))
+    service = preparer(MediaReading(status="extracted", reason="", description="Zrzut ekranu.", text_complete=True, fragments=[fragment()]))
     result = service.prepare_media(
         Media(data=b"x" * MAX_MEDIA_BYTES, mime_type="audio/wav"), source_name="test.wav"
     )
@@ -206,6 +216,8 @@ def test_multimodal_sdk_request_and_claim_pipeline_preserve_ocr_quote() -> None:
                 {
                     "status": "extracted",
                     "reason": "",
+                    "description": "Zrzut ekranu wpisu.",
+                    "text_complete": True,
                     "fragments": [
                         {
                             "text": "Podatek nie wzrośnie.",
@@ -291,3 +303,24 @@ def test_pdf_links_are_read_as_text_blocks(monkeypatch) -> None:
 
     assert title is None
     assert blocks == ["Poradnik bezpieczeństwa", "Zgromadź zapas wody pitnej na 3 dni."]
+
+
+def test_media_readout_shows_all_read_text_but_not_the_question() -> None:
+    from prawdowid.services.intake import _media_readout
+
+    prepared = PreparedInput(
+        segments=[
+            InputSegment(id="question-1", text="Czy to prawda?", origin="question"),
+            InputSegment(id="media-1", text="Jan Kowalski", origin="ocr"),
+            InputSegment(id="media-2", text="Podatek nie wzrośnie.", origin="ocr"),
+        ],
+        media_description="Zrzut ekranu wpisu.",
+        media_text_complete=False,
+    )
+
+    readout = _media_readout(prepared)
+
+    assert readout is not None
+    assert readout.text == "Jan Kowalski\n\nPodatek nie wzrośnie."
+    assert readout.description == "Zrzut ekranu wpisu." and readout.text_complete is False
+    assert _media_readout(prepared.model_copy(update={"media_description": None, "media_text_complete": None})) is None

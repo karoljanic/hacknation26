@@ -22,7 +22,10 @@ Relative dates ("dziś", "jutro", "wczoraj", "w tym tygodniu", "teraz"): in the
 asker's own question or statement addressed to us, they mean the "today" date
 given with the input; resolve them and write the absolute date into the claim
 text and search_queries (e.g. "Czy dziś spadły rakiety?" with today 2026-11-21
--> "Czy 21 listopada 2026 r. spadły rakiety?"). In quoted or forwarded material
+-> "Czy 21 listopada 2026 r. spadły rakiety?"). Keep "teraz", "obecnie" or
+"aktualnie" and add the date to it ("Czy teraz pada w Toruniu?" -> "Czy teraz,
+21 listopada 2026 r., pada w Toruniu?"): the claim is about this moment, not
+the whole day. In quoted or forwarded material
 (a message someone sent, an article, a screenshot), they refer to its unknown
 writing date: keep them and list them as ambiguities; never assume that the
 date of processing is the publication date there. This holds even when the

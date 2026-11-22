@@ -142,3 +142,32 @@ def test_measurement_api_without_matching_documents_contributes_nothing() -> Non
 
     assert [item.source for item in matched.items] == ["imgw"]
     assert unrelated.items == [] and unrelated.failed_slugs == []
+
+
+def synop(station: str, station_id: str) -> _Document:
+    return _Document(
+        title=f"Pomiar meteorologiczny IMGW – stacja {station} (2026-11-22 02:00)",
+        url=f"https://danepubliczne.imgw.pl/api/data/synop/id/{station_id}",
+        text=f"Dane synoptyczne IMGW-PIB ze stacji {station}: suma opadu 0.7 mm.",
+    )
+
+
+def test_measurement_from_the_named_town_comes_before_matching_warnings() -> None:
+    warnings = [
+        _Document(
+            title=f"Ostrzeżenie meteorologiczne IMGW nr {n}",
+            url=f"https://danepubliczne.imgw.pl/api/data/warningsmeteo/{n}",
+            text="Biuro Prognoz w Warszawie: miejscami opady deszczu, pada deszcz.",
+        )
+        for n in range(6)
+    ]
+    documents = [*warnings, synop("Warszawa", "12375"), synop("Toruń", "12250")]
+    fetcher = GovConnectorFetcher(imgw_reader=lambda: documents)
+    imgw = [site_entry("imgw", collector="imgw")]
+
+    in_warsaw = fetcher.fetch_many(imgw, claim_terms(["Czy pada deszcz w Warszawie?"]), "Czy pada deszcz w Warszawie?")
+    in_bydgoszcz = fetcher.fetch_many(imgw, claim_terms(["Czy pada w Bydgoszczy?"]), "Czy pada w Bydgoszczy?")
+
+    assert str(in_warsaw.items[0].url).endswith("/12375") and len(in_warsaw.items) == 4
+    assert str(in_bydgoszcz.items[0].url).endswith("/12250")
+    assert "najbliższa stacja synoptyczna IMGW dla miejscowości Bydgoszcz" in in_bydgoszcz.items[0].title

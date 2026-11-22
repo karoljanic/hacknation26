@@ -31,11 +31,18 @@ type Claim = {
   missing_details?: string[];
 };
 
+type MediaInfo = {
+  description: string;
+  text: string;
+  text_complete: boolean;
+};
+
 type CheckResponse = {
   run_id: string;
   status: RunStatus;
   message: string | null;
   claims: Claim[];
+  media?: MediaInfo | null;
   skipped_claims?: string[];
   answer_hash?: string | null;
 };
@@ -49,6 +56,31 @@ type VerifyResponse = {
 
 const MAX_FILE_BYTES = 12_000_000;
 
+// Posts on these platforms cannot be read from a link; mirrors the API check.
+const SOCIAL_PLATFORMS: Record<string, string> = {
+  "x.com": "X",
+  "twitter.com": "X",
+  "t.co": "X",
+  "tiktok.com": "TikTok",
+  "instagram.com": "Instagram",
+  "facebook.com": "Facebook",
+  "fb.com": "Facebook",
+  "fb.watch": "Facebook",
+};
+
+function socialPlatform(link: string): string | null {
+  let host: string;
+  try {
+    host = new URL(link.trim()).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  for (const [domain, name] of Object.entries(SOCIAL_PLATFORMS)) {
+    if (host === domain || host.endsWith(`.${domain}`)) return name;
+  }
+  return null;
+}
+
 const ACCEPT: Record<"image" | "video", string[]> = {
   image: ["image/jpeg", "image/png", "image/webp"],
   video: ["video/mp4", "video/webm", "video/quicktime"],
@@ -56,8 +88,8 @@ const ACCEPT: Record<"image" | "video", string[]> = {
 
 const OPTIONS: { value: InputType; label: string; hint: string }[] = [
   { value: "text", label: "Tekst lub pytanie", hint: "wiadomość, wpis, cytat, pytanie" },
-  { value: "url", label: "Link", hint: "artykuł, wpis, nagranie" },
-  { value: "image", label: "Zdjęcie", hint: "zdjęcie lub zrzut ekranu (Ctrl+V)" },
+  { value: "url", label: "Link", hint: "artykuł, strona internetowa" },
+  { value: "image", label: "Zdjęcie", hint: "zdjęcie lub zrzut ekranu" },
   { value: "video", label: "Wideo", hint: "nagranie wideo" },
 ];
 
@@ -94,7 +126,7 @@ type LoadingMode = "check" | "verify-image";
 type State =
   | { kind: "idle" }
   | { kind: "loading"; mode: LoadingMode }
-  | { kind: "needs-clarification"; message: string | null }
+  | { kind: "needs-clarification"; message: string | null; media: MediaInfo | null }
   | { kind: "out-of-scope"; message: string | null }
   | { kind: "busy"; message: string; retryAfter: number | null }
   | { kind: "invalid"; message: string }
@@ -102,6 +134,7 @@ type State =
   | {
     kind: "done";
     message: string | null;
+    media: MediaInfo | null;
     claims: Claim[];
     skipped: string[];
     answerHash: string | null;
@@ -150,6 +183,7 @@ export function CheckForm() {
 
   const isMedia = type === "image" || type === "video";
   const { text, url, file } = drafts[type];
+  const linkPlatform = type === "url" ? socialPlatform(url) : null;
 
   function updateDraft(change: Partial<Draft>) {
     setDrafts((current) => ({ ...current, [type]: { ...current[type], ...change } }));
@@ -261,13 +295,14 @@ export function CheckForm() {
         setState({
           kind: "done",
           message: payload.message ?? null,
+          media: payload.media ?? null,
           claims: payload.claims ?? [],
           skipped: payload.skipped_claims ?? [],
           answerHash: payload.answer_hash ?? null,
         });
         break;
       case "needs_clarification":
-        setState({ kind: "needs-clarification", message: payload.message ?? null });
+        setState({ kind: "needs-clarification", message: payload.message ?? null, media: payload.media ?? null });
         break;
       case "out_of_scope":
         setState({ kind: "out-of-scope", message: payload.message ?? null });
@@ -284,6 +319,7 @@ export function CheckForm() {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (state.kind === "loading") return;
+    if (linkPlatform) return;
     if (isMedia && !file) {
       setFileError(type === "image" ? "Wybierz zdjęcie lub wklej zrzut ekranu." : "Wybierz nagranie.");
       return;
@@ -367,7 +403,7 @@ export function CheckForm() {
               Link
             </label>
             <p id={`${ids}-url-hint`} className="field__hint">
-              Adres artykułu, wpisu lub nagrania, np. https://example.org/artykul
+              Adres artykułu lub strony, np. https://example.org/artykul
             </p>
             <input
               id={`${ids}-url`}
@@ -376,9 +412,24 @@ export function CheckForm() {
               required
               value={url}
               onChange={(event) => updateDraft({ url: event.target.value })}
-              aria-describedby={`${ids}-url-hint`}
+              aria-describedby={`${ids}-url-hint${linkPlatform ? ` ${ids}-url-social` : ""}`}
+              aria-invalid={linkPlatform ? true : undefined}
               className="input"
             />
+            {linkPlatform && (
+              <div id={`${ids}-url-social`} className="alert alert--warning social-link" role="alert">
+                <p className="alert__title">Wpisu z serwisu {linkPlatform} nie odczytam z linku</p>
+                <p>Zrób zrzut ekranu wpisu albo pobierz nagranie i wrzuć plik.</p>
+                <div className="social-link__actions">
+                  <button type="button" className="button button--secondary" onClick={() => changeType("image")}>
+                    Wrzuć zrzut ekranu
+                  </button>
+                  <button type="button" className="button button--secondary" onClick={() => changeType("video")}>
+                    Wrzuć wideo
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -521,6 +572,31 @@ function SearchProgress({ mode }: { mode: LoadingMode }) {
   );
 }
 
+function MediaReadout({ media }: { media: MediaInfo }) {
+  return (
+    <section className="media-readout" aria-label="Co odczytano z pliku">
+      {media.description && (
+        <p className="media-readout__description">
+          <strong>Na pliku:</strong> {media.description}
+        </p>
+      )}
+      {media.text ? (
+        <details className="media-readout__text" open>
+          <summary>Odczytany tekst</summary>
+          <p>{media.text}</p>
+        </details>
+      ) : (
+        <p className="media-readout__empty">Nie odczytano żadnego tekstu.</p>
+      )}
+      {!media.text_complete && (
+        <p className="media-readout__warning">
+          Części tekstu nie udało się odczytać w całości. Sprawdź, czy niczego nie brakuje.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Result({ state }: { state: State }) {
   switch (state.kind) {
     case "invalid":
@@ -547,12 +623,15 @@ function Result({ state }: { state: State }) {
       );
     case "needs-clarification":
       return (
-        <div className="alert alert--info">
-          <p className="alert__title">Doprecyzuj zgłoszenie</p>
-          <p>
-            {state.message ??
-              "Nie udało się odczytać treści do sprawdzenia. Opisz dokładniej, co chcesz zweryfikować."}
-          </p>
+        <div className="results">
+          {state.media && <MediaReadout media={state.media} />}
+          <div className="alert alert--info">
+            <p className="alert__title">Doprecyzuj zgłoszenie</p>
+            <p>
+              {state.message ??
+                "Nie udało się odczytać treści do sprawdzenia. Opisz dokładniej, co chcesz zweryfikować."}
+            </p>
+          </div>
         </div>
       );
     case "error":
@@ -584,6 +663,7 @@ function Result({ state }: { state: State }) {
       if (state.claims.length === 0) {
         return (
           <div className="results">
+            {state.media && <MediaReadout media={state.media} />}
             <div className="alert alert--info">
               <div className="alert__header">
                 <p className="alert__title">Brak twierdzeń do sprawdzenia</p>
@@ -596,6 +676,7 @@ function Result({ state }: { state: State }) {
       }
       return (
         <div className="results">
+          {state.media && <MediaReadout media={state.media} />}
           {state.message && (
             <div className="alert alert--info">
               <p>{state.message}</p>

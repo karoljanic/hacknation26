@@ -371,6 +371,27 @@ textarea.input {
   border-color: var(--color-primary-dark);
 }
 
+.button--secondary {
+  color: var(--color-primary);
+  background: #fff;
+  padding: 0.5rem 1rem;
+}
+
+.button--secondary:hover {
+  color: #fff;
+}
+
+.social-link {
+  margin-top: 0.5rem;
+}
+
+.social-link__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 .button:disabled {
   opacity: 0.7;
   cursor: progress;
@@ -538,6 +559,45 @@ textarea.input {
   margin: 0.5rem 0 0;
   padding-left: 1.25rem;
   color: var(--color-muted);
+}
+
+.media-readout {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: 0.9375rem;
+}
+
+.media-readout__description {
+  margin: 0;
+}
+
+.media-readout__text {
+  margin-top: 0.5rem;
+}
+
+.media-readout__text summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.media-readout__text p {
+  margin: 0.5rem 0 0;
+  white-space: pre-wrap;
+  color: var(--color-muted);
+}
+
+.media-readout__empty {
+  margin: 0.5rem 0 0;
+  color: var(--color-muted);
+}
+
+.media-readout__warning {
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px dashed var(--color-warning-border);
+  background: var(--color-warning-bg);
 }
 
 .basis-badge {

@@ -88,7 +88,13 @@ exact dates, not only relative words: "dziś, 21 listopada 2026 r.",
 list from one moment (e.g. a morning report saying there are no warnings)
 says nothing about what was issued or valid later: compare publication times
 before treating it as a contradiction, and prefer the primary source (IMGW
-for weather warnings, GDDKiA for roads) over a summary.
+for weather warnings, GDDKiA for roads) over a summary. A weather measurement
+describes its own hour: for "teraz" give the latest measurement with its time
+and place (e.g. "Ostatni pomiar IMGW w Toruniu, o 2:00: 0 mm opadu, 1,6 °C").
+A precipitation sum ("suma opadu") is rain that fell during the measuring
+period, not proof that it is raining at this moment: without a report of
+current conditions use insufficient_evidence and describe the measurement.
+When the station is the nearest one, not the asked town, say so.
 
 false versus misleading. Split the claim into its core assertion (what
 happened or exists) and its details (who did it, by whom, when, how much,
@@ -376,6 +382,23 @@ PARTIAL_INSTRUCTIONS = (
 )
 
 
+# A quote reporting an accusation or suspicion ("accused of spying") does not
+# confirm it as a fact ("an agent"), unless the claim itself is about the
+# accusation. Deterministic: the decision model scores such pairs near its
+# threshold, so the outcome would be a coin toss. "rzekomy" is left out: it
+# usually describes a scammer's pretext ("o rzekomych problemach z doręczeniem").
+ALLEGATION = re.compile(
+    r"\b(accus\w*|alleg\w*|suspect\w*|reportedly|oskarż\w*|podejrz\w*|zarzu\w*|domniema\w*)",
+    re.IGNORECASE,
+)
+
+
+def _confirms_only_an_allegation(claim_text: str, assessment: ClaimAssessmentOutput) -> bool:
+    if assessment.verdict != "confirmed" or ALLEGATION.search(claim_text):
+        return False
+    return any(ALLEGATION.search(c.quote) for c in assessment.citations if c.relation == "supports")
+
+
 def _partly_true(assessment: ClaimAssessmentOutput) -> ClaimAssessmentOutput:
     """The source confirms the claim's core but not a detail: a partial truth
     ("misleading"), not a hard verdict and not "nothing found"."""
@@ -443,12 +466,17 @@ class AssessmentGenerator:
         }
         if self.exactness is None or not hard:
             return
-        exact = self._ask(by_id, hard, EXACTNESS_INSTRUCTIONS, direction=True)
-        if exact is None:
-            # Quotes are already verified verbatim; an outage of this second
-            # check must not turn every verdict into a technical failure.
-            return
-        inexact = {claim_id: hard[claim_id] for claim_id, score in exact.items() if score < EXACTNESS_THRESHOLD}
+        alleged = {
+            claim_id for claim_id, assessment in hard.items()
+            if _confirms_only_an_allegation(by_id[claim_id].claim_text, assessment)
+        }
+        unchecked = {claim_id: assessment for claim_id, assessment in hard.items() if claim_id not in alleged}
+        exact = self._ask(by_id, unchecked, EXACTNESS_INSTRUCTIONS, direction=True) if unchecked else {}
+        # Quotes are already verified verbatim; an outage of this second
+        # check (None) must not turn every verdict into a technical failure.
+        inexact = {claim_id: hard[claim_id] for claim_id in alleged} | {
+            claim_id: hard[claim_id] for claim_id, score in (exact or {}).items() if score < EXACTNESS_THRESHOLD
+        }
         if not inexact:
             return
         partial = self._ask(by_id, inexact, PARTIAL_INSTRUCTIONS, direction=False) or {}

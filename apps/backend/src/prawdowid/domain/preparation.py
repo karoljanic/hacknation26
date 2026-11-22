@@ -21,7 +21,19 @@ class MediaReading(BaseModel):
 
     status: Literal["extracted", "no_content", "unreadable"]
     reason: str
+    description: str
+    text_complete: bool
     fragments: list[MediaFragment]
+
+
+class MediaReadout(BaseModel):
+    """What was read from an uploaded image or recording, shown to the asker."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str
+    text: str
+    text_complete: bool
 
 
 class PreparedInput(BaseModel):
@@ -35,3 +47,5 @@ class PreparedInput(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     notes: list[str] = Field(default_factory=list)
+    media_description: str | None = None
+    media_text_complete: bool | None = None

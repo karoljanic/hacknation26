@@ -500,6 +500,26 @@ def test_exact_quote_keeps_the_hard_verdict_and_an_outage_does_not_change_it() -
     assert exact.verdict == "false" and unchecked.verdict == "false"
 
 
+def test_quote_reporting_only_an_accusation_does_not_confirm_it_as_fact() -> None:
+    quote = "Huang admitted to an affair with an executive whom officials accused of spying for Beijing."
+    llm = Mock()
+    llm.generate_structured.return_value = output(
+        verdict="confirmed", citations=[{"evidence_index": 0, "quote": quote, "relation": "supports"}]
+    )
+    agent = ClaimEvidenceBundle(
+        claim_id="c1", claim_text="Czy Huang miał romans z chińską agentką?", claim_kind="verification_question",
+        evidence=[evidence(quote)],
+    )
+    exactness = exactness_scores(0.9, partial=0.8)  # the decision model would have passed it as exact
+
+    assessment = AssessmentGenerator(llm=llm, exactness=exactness).assess([agent]).data.assessments[0]
+    about_accusation = agent.model_copy(update={"claim_text": "Czy Huang miał romans z kobietą oskarżoną o szpiegostwo?"})
+    kept = AssessmentGenerator(llm=llm, exactness=exactness_scores(0.9)).assess([about_accusation]).data.assessments[0]
+
+    assert assessment.verdict == "misleading" and assessment.explanation.startswith("Częściowo.")
+    assert kept.verdict == "confirmed"
+
+
 def test_quote_confirming_the_core_but_not_a_detail_is_a_partial_truth() -> None:
     llm = Mock()
     llm.generate_structured.return_value = output(

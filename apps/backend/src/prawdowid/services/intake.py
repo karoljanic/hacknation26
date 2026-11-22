@@ -26,7 +26,7 @@ from prawdowid.domain.enums import (
     RunStatus,
     SubmissionClaimRelation,
 )
-from prawdowid.domain.preparation import PreparedInput
+from prawdowid.domain.preparation import MediaReadout, PreparedInput
 from prawdowid.persistence import claims as claim_repo
 from prawdowid.persistence.models import Claim, Submission, SubmissionClaim, VerificationRun
 from prawdowid.security.redaction import redact
@@ -86,6 +86,8 @@ class IntakeResult:
     # The link the user submitted and its (redacted) page text, if any.
     source_url: str | None = None
     source_text: str = ""
+    # Description and full text read from an uploaded image or recording.
+    media: MediaReadout | None = None
 
 
 class ClaimIntake:
@@ -169,9 +171,11 @@ class ClaimIntake:
         started = time.monotonic()
         submission_id, run_id = self._open(channel, redacted_text, url, sender_hash)
         models: list[dict[str, Any]] = []
+        media: MediaReadout | None = None
         try:
             prepared = prepare()
             prepared = self._redact_segments(prepared)
+            media = _media_readout(prepared)
             # Keep the user's own (media-read) text; for URLs store only the
             # link, never a copy of the article.
             if redacted_text is None and url is None:
@@ -189,9 +193,12 @@ class ClaimIntake:
             return self._close(submission_id, run_id, started, models, RunStatus.OUT_OF_SCOPE,
                                CONTENT_BLOCKED_MESSAGE, error=str(exc), redacted_text=redacted_text)
         except NoExtractableContentError as exc:
+            description = redact(exc.media_description)[0] if exc.media_description else None
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
-                               "Nie udało się odczytać treści do sprawdzenia.", error=str(exc),
-                               redacted_text=redacted_text)
+                               exc.user_message or "Nie udało się odczytać treści do sprawdzenia.", error=str(exc),
+                               redacted_text=redacted_text,
+                               media=MediaReadout(description=description, text="", text_complete=True)
+                               if description else None)
         except ValidationError as exc:  # malformed model output (subclass of ValueError)
             return self._close(submission_id, run_id, started, models, RunStatus.TECH_FAILURE,
                                "Błąd techniczny podczas analizy. Spróbuj ponownie później.",
@@ -214,7 +221,7 @@ class ClaimIntake:
                 else "Nie znaleziono twierdzeń do sprawdzenia. Opisz, co dokładnie chcesz zweryfikować."
             )
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
-                               message, redacted_text=redacted_text)
+                               message, redacted_text=redacted_text, media=media)
 
         stored = self._store_claims(submission_id, extraction, embeddings)
         self._close(submission_id, run_id, started, models, RunStatus.OK, None,
@@ -223,7 +230,7 @@ class ClaimIntake:
         source_text = "\n".join(segment.text for segment in prepared.segments if segment.origin == "article")
         return IntakeResult(
             submission_id, run_id, RunStatus.OK, stored, input_text=input_text,
-            source_url=url, source_text=source_text,
+            source_url=url, source_text=source_text, media=media,
         )
 
     @staticmethod
@@ -371,6 +378,7 @@ class ClaimIntake:
         error: str | None = None,
         redacted_text: str | None = None,
         finish: bool = True,
+        media: MediaReadout | None = None,
     ) -> IntakeResult:
         with self.session_factory() as session, session.begin():
             run = session.get_one(VerificationRun, run_id)
@@ -385,7 +393,20 @@ class ClaimIntake:
                 submission = session.get_one(Submission, submission_id)
                 if submission.redacted_text is None:
                     submission.redacted_text = redacted_text
-        return IntakeResult(submission_id, run_id, status, message=message)
+        return IntakeResult(submission_id, run_id, status, message=message, media=media)
+
+
+MEDIA_ORIGINS = {"ocr", "audio_transcript", "video_frame"}
+
+
+def _media_readout(prepared: PreparedInput) -> MediaReadout | None:
+    if prepared.media_description is None and prepared.media_text_complete is None:
+        return None
+    return MediaReadout(
+        description=redact(prepared.media_description)[0] if prepared.media_description else "",
+        text="\n\n".join(segment.text for segment in prepared.segments if segment.origin in MEDIA_ORIGINS),
+        text_complete=prepared.media_text_complete is not False,
+    )
 
 
 _usage = usage_entry

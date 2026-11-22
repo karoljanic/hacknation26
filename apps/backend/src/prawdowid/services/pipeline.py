@@ -11,7 +11,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,7 +25,7 @@ from prawdowid.domain.evidence import (
     EvidenceSearchResult,
     InjectionNote,
 )
-from prawdowid.domain.preparation import PreparedInput
+from prawdowid.domain.preparation import MediaReadout, PreparedInput
 from prawdowid.persistence.models import VerificationRun
 from prawdowid.services.assessment import (
     OPEN_QUESTION_MESSAGE,
@@ -72,6 +72,7 @@ class PipelineResult:
     # Side claims not verified because the submission had more than the
     # selector's limit; listed to the user, never silently dropped.
     skipped_claims: list[str] = field(default_factory=list)
+    media: MediaReadout | None = None
 
 
 class VerificationPipeline:
@@ -135,7 +136,8 @@ class VerificationPipeline:
         if intake_result.status != RunStatus.OK:
             # Intake already closed the run with its own status.
             return PipelineResult(
-                intake_result.submission_id, intake_result.run_id, intake_result.status, intake_result.message
+                intake_result.submission_id, intake_result.run_id, intake_result.status, intake_result.message,
+                media=intake_result.media,
             )
         telemetry = _RunTelemetry()
         try:
@@ -163,7 +165,7 @@ class VerificationPipeline:
             await asyncio.to_thread(self._finish_run, intake_result.run_id, result, telemetry)
         except Exception:
             log.warning("Closing run %s failed", intake_result.run_id, exc_info=True)
-        return result
+        return replace(result, media=intake_result.media)
 
     async def _verify(self, intake_result: IntakeResult, telemetry: "_RunTelemetry") -> PipelineResult:
         by_id = {str(stored.claim_id): stored for stored in intake_result.claims}

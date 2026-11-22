@@ -9,6 +9,8 @@ from prawdowid.ai.adapters.media import Media
 # Fact-checking is about violence, war, crime and hate speech by nature: block
 # only content rated highly likely harmful. Prohibited content (e.g. child
 # abuse) stays blocked by the provider regardless of these settings.
+STRUCTURED_ATTEMPTS = 2
+
 SAFETY_SETTINGS = [
     types.SafetySetting(category=category, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH)
     for category in (
@@ -98,31 +100,40 @@ class GeminiAdapter:
         if media is not None:
             parts.append(types.Part.from_bytes(data=media.data, mime_type=media.mime_type))
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=types.Content(role="user", parts=parts),
-            config=types.GenerateContentConfig(
-                system_instruction=instructions,
-                response_mime_type="application/json",
-                response_json_schema=schema.model_json_schema(),
-                thinking_config=self._thinking(),
-                safety_settings=SAFETY_SETTINGS,
-            ),
-        )
-        _raise_if_blocked(response)
-        text = response.text
-        if not text:
-            raise RuntimeError("Gemini returned no structured output")
-        try:
-            data = schema.model_validate_json(text)
-        except ValidationError as error:
-            raise RuntimeError("Gemini returned output that does not match the schema") from error
+        input_tokens = output_tokens = 0
+        # Structured output occasionally breaks the schema; one fresh attempt usually fixes it.
+        for attempt in range(STRUCTURED_ATTEMPTS):
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=types.Content(role="user", parts=parts),
+                config=types.GenerateContentConfig(
+                    system_instruction=instructions,
+                    response_mime_type="application/json",
+                    response_json_schema=schema.model_json_schema(),
+                    thinking_config=self._thinking(),
+                    safety_settings=SAFETY_SETTINGS,
+                ),
+            )
+            _raise_if_blocked(response)
+            usage = getattr(response, "usage_metadata", None)
+            input_tokens += (usage.prompt_token_count or 0) if usage else 0
+            output_tokens += (usage.candidates_token_count or 0) if usage else 0
+            text = response.text
+            try:
+                if not text:
+                    raise RuntimeError("Gemini returned no structured output")
+                data = schema.model_validate_json(text)
+                break
+            except (RuntimeError, ValidationError) as error:
+                if attempt + 1 == STRUCTURED_ATTEMPTS:
+                    if isinstance(error, RuntimeError):
+                        raise
+                    raise RuntimeError("Gemini returned output that does not match the schema") from error
 
-        usage = response.usage_metadata
         return StructuredResult(
             data=data,
             requested_model=self.model,
             model_version=response.model_version,
-            input_tokens=usage.prompt_token_count if usage else None,
-            output_tokens=usage.candidates_token_count if usage else None,
+            input_tokens=input_tokens or None,
+            output_tokens=output_tokens or None,
         )

@@ -463,7 +463,7 @@ class EvidenceSearchOrchestrator:
             if not selected:
                 return []
             wanted = claim_terms([claim.text, *claim.search_queries])
-            return self.gov_fetcher.fetch_many(selected, wanted).items
+            return self.gov_fetcher.fetch_many(selected, wanted, claim_text=claim.text).items
         except Exception:
             log.warning("gov.pl connector step failed", exc_info=True)
             return []

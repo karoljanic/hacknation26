@@ -3,6 +3,7 @@ from unittest.mock import Mock
 import pytest
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 from typesafe_sdk import SystemOneResponse, TypeSafeClient
 
 from prawdowid.ai.adapters.decision import (
@@ -74,6 +75,38 @@ def test_gemini_rejects_empty_input_and_empty_output() -> None:
     client.models.generate_content.return_value = types.GenerateContentResponse()
     with pytest.raises(RuntimeError, match="no text"):
         adapter.generate("Test")
+
+
+def json_response(text: str) -> types.GenerateContentResponse:
+    return types.GenerateContentResponse.model_validate(
+        {
+            "candidates": [{"content": {"parts": [{"text": text}]}}],
+            "usage_metadata": {"prompt_token_count": 10, "candidates_token_count": 2},
+        }
+    )
+
+
+class Answer(BaseModel):
+    answer: str
+
+
+def test_gemini_retries_once_when_output_breaks_the_schema() -> None:
+    client = Mock(spec=genai.Client)
+    client.models.generate_content.side_effect = [json_response('{"wrong": 1}'), json_response('{"answer": "tak"}')]
+
+    result = GeminiAdapter(client, "fast-model").generate_structured("Test", Answer, instructions="Odpowiedz.")
+
+    assert result.data.answer == "tak"
+    assert result.input_tokens == 20  # both attempts are billed
+
+
+def test_gemini_gives_up_after_the_second_bad_output() -> None:
+    client = Mock(spec=genai.Client)
+    client.models.generate_content.return_value = json_response('{"wrong": 1}')
+
+    with pytest.raises(RuntimeError, match="schema"):
+        GeminiAdapter(client, "fast-model").generate_structured("Test", Answer, instructions="Odpowiedz.")
+    assert client.models.generate_content.call_count == 2
 
 
 def decision_response() -> SystemOneResponse:
