@@ -1,10 +1,11 @@
+"""Input preparation: text normalization, web page fetching and media extraction."""
+
 import re
 
 from prawdowid.adapters.sources.gov_pl import extract_pdf_text, sanitize_soup
-
+from prawdowid.adapters.sources.web import ArticleFetcher, FetchedArticle
 from prawdowid.ai.adapters.llm import LLMAdapter
 from prawdowid.ai.adapters.media import Media
-from prawdowid.adapters.sources.web import ArticleFetcher, FetchedArticle
 from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.preparation import MediaReading, PreparedInput
 from prawdowid.security.injection import detect_hidden_html_injections

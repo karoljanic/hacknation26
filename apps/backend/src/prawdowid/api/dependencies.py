@@ -21,6 +21,7 @@ from typesafe_sdk import RetryPolicy, TypeSafeClient
 
 from prawdowid.adapters.sources.euvsdisinfo import EUvsDisinfoAdapter
 from prawdowid.adapters.sources.google_fact_check import GoogleFactCheckAdapter
+from prawdowid.adapters.sources.gov_api import GovPlSearchClient, OdyseuszClient
 from prawdowid.adapters.sources.web import PublicWebFetcher
 from prawdowid.ai.instances.gemini import GeminiAdapter
 from prawdowid.ai.instances.gemini_embeddings import GeminiEmbeddingAdapter
@@ -30,7 +31,6 @@ from prawdowid.ingestion.catalog import load_catalog
 from prawdowid.persistence.db import session_factory
 from prawdowid.persistence.models import EMBEDDING_DIM
 from prawdowid.services.assessment import AssessmentGenerator
-from prawdowid.adapters.sources.gov_api import GovPlSearchClient, OdyseuszClient
 from prawdowid.services.claim_selection import ClaimSelector
 from prawdowid.services.claims import ClaimExtractor
 from prawdowid.services.evidence_search import EvidenceSearchOrchestrator

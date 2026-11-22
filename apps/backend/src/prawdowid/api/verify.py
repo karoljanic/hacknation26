@@ -34,7 +34,7 @@ from prawdowid.services.attestation import (
 from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES
 
 router = APIRouter(tags=["verify"], dependencies=[Depends(admit_check)])
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 
 class VerifierUnavailable(RuntimeError):
@@ -174,7 +174,7 @@ async def verify(
     except VerifierUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:
-        logger.warning("Unexpected failure in POST /verify", exc_info=True)
+        log.warning("Unexpected failure in POST /verify", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Błąd techniczny podczas weryfikacji zrzutu ekranu. Spróbuj ponownie później.",

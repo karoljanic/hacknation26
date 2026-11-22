@@ -6,11 +6,11 @@ lokalny, nie wynik referencyjnego zestawu jury.
 
 ## Wyniki scenariuszy
 
-[Tabela wyników](../test_cases_table.md) zawiera 27 scenariuszy: 16 ocenionych
+[Tabela wyników](test_cases_table.md) zawiera 27 scenariuszy: 16 ocenionych
 jako zgodne, 4 częściowo zgodne, 3 niezgodne, 1 inny, ale uzasadniony oraz
 3 nieuruchomione. Są to oceny z raportu, nie macro-F1. Scenariusze A
 pochodzą z interfejsu WWW; B–I uruchomiono 22.11.2026 przez lokalne API.
-Pełne odpowiedzi i uzasadnienia ocen są w [test_cases.md](../test_cases.md).
+Pełne odpowiedzi i uzasadnienia ocen są w [test_cases.md](test_cases.md).
 
 | Obszar | Zaobserwowany wynik i ograniczenie |
 | --- | --- |
@@ -55,8 +55,8 @@ bazy/cache; nie należy oczekiwać identycznych odpowiedzi przy ponownym teście
   [obrazy](../data/eval/test_cases_run_2026-11-22/img/),
   [surowe odpowiedzi i czasy](../data/eval/test_cases_run_2026-11-22/results.json)
   oraz [skrypt](../data/eval/test_cases_run_2026-11-22/run_cases.py).
-- [Przypadki i oczekiwania](../test_cases.md) oraz
-  [zestawienie ocen](../test_cases_table.md).
+- [Przypadki i oczekiwania](test_cases.md) oraz
+  [zestawienie ocen](test_cases_table.md).
 - Dodatkowy [zestaw faktów ze źródeł](../data/eval/link_facts.json) i jego
   [runner](../apps/backend/examples/run_link_eval.py) nie stanowią pełnego
   zestawu do obliczenia mierników sekcji 6.

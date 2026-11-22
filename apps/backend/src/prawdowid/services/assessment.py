@@ -305,17 +305,8 @@ def _enforce_basis(bundle: ClaimEvidenceBundle, assessment: ClaimAssessmentOutpu
     )
 
 
-_today = today_in_poland
-
-
 VALIDATION_ATTEMPTS = 2
 REQUIRED_RELATION_BY_VERDICT = {"confirmed": "supports", "false": "refutes", "misleading": "refutes"}
-
-
-def find_verbatim(quote: str, text: str) -> str | None:
-    """The exact span of ``text`` that ``quote`` reproduces, or ``None``
-    (tolerant matching, see ``domain.quotes``)."""
-    return source_span(text, quote)
 
 
 def _verify_citations(bundle: ClaimEvidenceBundle, assessment: ClaimAssessmentOutput) -> ClaimAssessmentOutput:
@@ -446,7 +437,7 @@ class AssessmentGenerator:
         *,
         llm: LLMAdapter,
         max_claims: int = MAX_CLAIMS_PER_CALL,
-        today: Callable[[], date] = _today,
+        today: Callable[[], date] = today_in_poland,
         exactness: DecisionAdapter | None = None,
     ) -> None:
         """``exactness``: a light decision model double-checking that every

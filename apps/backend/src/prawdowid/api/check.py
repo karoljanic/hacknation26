@@ -20,12 +20,12 @@ merit result.
 """
 
 import asyncio
+import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from enum import StrEnum
-import logging
-from typing import Literal, Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, HttpUrl, ValidationError, TypeAdapter
@@ -58,7 +58,7 @@ from prawdowid.security.attestation import (
 from prawdowid.security.injection_guard import InjectionGuard, get_injection_guard_factory
 
 router = APIRouter(tags=["check"], dependencies=[Depends(admit_check)])
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 MAX_TEXT_LENGTH = MAX_TEXT_CHARS
 TECH_FAILURE_MESSAGE = "Błąd techniczny podczas sprawdzania. Spróbuj ponownie później."
@@ -151,6 +151,7 @@ class CheckResponse(BaseModel):
         description="Kanoniczna treść komunikatu dla `answer_hash` (gdy `claims` jest puste).",
     )
 
+
 class ErrorResponse(BaseModel):
     detail: str
 
@@ -219,7 +220,7 @@ async def _record_blocked(
                 scores=dict(screening.scores), message=INJECTION_BLOCKED_MESSAGE,
             )
     except Exception:
-        logger.warning("Recording a blocked injection attempt failed", exc_info=True)
+        log.warning("Recording a blocked injection attempt failed", exc_info=True)
 
 
 def _prepend_question(segments: list[InputSegment], question: str) -> list[InputSegment]:
@@ -407,11 +408,11 @@ async def check(
             guard = await asyncio.to_thread(guard_factory)
             screening = await guard.screen(text)
         except Exception:
-            logger.exception("Injection guard unavailable; request rejected (fail closed)")
+            log.exception("Injection guard unavailable; request rejected (fail closed)")
             return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=TECH_FAILURE_MESSAGE)
         if screening.blocked:
             # Scores and shape only: the text itself may hold personal data.
-            logger.warning(
+            log.warning(
                 "Blocked suspected prompt injection: type=%s channel=%s chars=%d blocked_by=%s scores=%s",
                 input_type.value, channel.value, len(text), ",".join(screening.blocked_by),
                 " ".join(f"{name}={score:.3f}" for name, score in screening.scores.items()),
@@ -462,16 +463,16 @@ async def check(
                     prepare, channel=channel, url=url if input_type is InputType.URL else None
                 )
     except PipelineUnavailable as exc:
-        logger.error("Pipeline unavailable: %s", exc)
+        log.error("Pipeline unavailable: %s", exc)
         return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=str(exc))
     except (NoExtractableContentError, ValueError) as exc:
-        logger.info("Input could not be prepared: %s", exc)
+        log.info("Input could not be prepared: %s", exc)
         return CheckResponse(run_id="", status=RunStatus.NEEDS_CLARIFICATION, message=INVALID_INPUT_MESSAGE)
     except Exception:  # provider outage, SDK bug, ... never a merit result
         # This can happen before a run exists (pipeline construction) or after
         # (an error the pipeline re-raised); in the latter case the pipeline
         # has already closed that run as tech_failure.
-        logger.warning("Unexpected failure in POST /check; no run_id available here", exc_info=True)
+        log.warning("Unexpected failure in POST /check; no run_id available here", exc_info=True)
         return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=TECH_FAILURE_MESSAGE)
 
     return _to_check_response(result)

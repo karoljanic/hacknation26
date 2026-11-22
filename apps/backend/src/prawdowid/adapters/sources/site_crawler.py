@@ -2,7 +2,7 @@ import http.client
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import timezone
 from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 

@@ -49,3 +49,41 @@ i limity dostawców oraz nadużycia i koszty. Obecny panel administratora
 jest demonstracyjny i przed publicznym wdrożeniem wymaga zabezpieczenia.
 
 Szczegóły: [ryzyka i obecne ograniczenia zabezpieczeń](docs/ryzyka.md).
+
+## Struktura repozytorium
+
+```
+.
+├── apps/
+│   ├── backend/          # FastAPI + worker (Python)
+│   │   ├── src/prawdowid/
+│   │   │   ├── adapters/ # Kanały (X DM) i źródła danych
+│   │   │   ├── ai/       # Adaptery LLM, embedding, media; instancje Gemini/Jev
+│   │   │   ├── api/      # Endpointy FastAPI, rate-limiting, autoryzacja X
+│   │   │   ├── domain/   # Modele domenowe i enumeracje
+│   │   │   ├── ingestion/# Katalog źródeł → kolekcja → dokumenty i fragmenty
+│   │   │   ├── persistence/ # Modele ORM, migracje Alembic, warstwa DB
+│   │   │   ├── security/ # Redakcja PII, detekcja prompt injection
+│   │   │   └── services/ # Logika biznesowa (pipeline, ocena, embedding…)
+│   │   ├── examples/     # Skrypty demonstracyjne i ewaluacyjne
+│   │   ├── scripts/      # Narzędzia pomocnicze (pobieranie modeli Guardrails)
+│   │   └── tests/        # Testy jednostkowe i integracyjne (pytest)
+│   └── web/              # Next.js frontend
+│       └── src/
+│           ├── app/      # Strony, API routes, style globalne
+│           └── components/ # Komponenty React
+├── data/
+│   ├── eval/             # Dane i wyniki testów ewaluacyjnych
+│   └── sources/          # Katalog źródeł (catalog.toml, API catalog)
+├── deploy/               # Docker Compose (produkcja, dev, CA)
+└── docs/                 # Dokumentacja projektu i wyniki testów
+    ├── architektura.md
+    ├── zrodla.md
+    ├── testy.md
+    ├── ryzyka.md
+    ├── test_cases.md
+    ├── test_cases_table.md
+    ├── examples.md
+    ├── links.md
+    └── media/            # Materiały demonstracyjne (wideo, obrazy)
+```

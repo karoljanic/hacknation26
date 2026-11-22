@@ -29,7 +29,7 @@ from prawdowid.adapters.sources.gov_pl import (
     sort_latest,
 )
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 ImgwDataset = Literal["warningsmeteo", "warningshydro", "synop", "hydro"]
 
@@ -635,6 +635,6 @@ class ImgwParser:
             try:
                 docs.extend(fn())
             except Exception as exc:
-                logger.warning("IMGW: błąd pobierania zbioru %s: %s", name, exc)
+                log.warning("IMGW: błąd pobierania zbioru %s: %s", name, exc)
                 continue
         return docs

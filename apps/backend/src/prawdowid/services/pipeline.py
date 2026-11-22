@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
+from prawdowid.ai.adapters.decision import DecisionAdapter
 from prawdowid.ai.adapters.llm import ContentBlocked
 from prawdowid.domain.enums import RunStatus
 from prawdowid.domain.evidence import (
@@ -28,6 +29,7 @@ from prawdowid.domain.evidence import (
 from prawdowid.domain.preparation import MediaReadout, PreparedInput
 from prawdowid.persistence.models import VerificationRun
 from prawdowid.security.injection import dedupe_injection_flags, detect_prompt_injections
+from prawdowid.services.answer_cache import ASSESSMENT_TTL, from_snapshot, latest_valid, snapshot_of, time_critical
 from prawdowid.services.assessment import (
     OPEN_QUESTION_MESSAGE,
     AssessmentGenerator,
@@ -36,8 +38,6 @@ from prawdowid.services.assessment import (
     opinion_assessment,
     with_unavailable_sources,
 )
-from prawdowid.ai.adapters.decision import DecisionAdapter
-from prawdowid.services.answer_cache import ASSESSMENT_TTL, from_snapshot, latest_valid, snapshot_of, time_critical
 from prawdowid.services.claim_selection import ClaimSelection, ClaimSelector
 from prawdowid.services.evidence_search import EvidenceSearchOrchestrator
 from prawdowid.services.intake import CONTENT_BLOCKED_MESSAGE, ClaimIntake, IntakeResult, StoredClaim

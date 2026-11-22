@@ -26,6 +26,7 @@ import httpx
 
 from prawdowid.adapters.sources.gov_pl import (
     RawResource,
+    _CHROME_TAGS,
     content_hash,
     normalize_text,
     parse_gov_date,
@@ -34,10 +35,9 @@ from prawdowid.adapters.sources.gov_pl import (
 )
 from prawdowid.adapters.sources.web import _is_public_address
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = "Prawdowid/0.1 (rss corpus ingestion)"
-_CHROME_TAGS = ("nav", "header", "footer", "aside", "form")
 _SKIP_LINK_FRAGMENTS = ("kontakt", "bip", "polityka-prywatnosci", "deklaracja", "szukaj")
 _PATH_PAGE_RE = re.compile(r"/(?:page|strona)/(\d+)/?$", re.IGNORECASE)
 
@@ -550,7 +550,7 @@ class RssParser:
                             if docs:
                                 return docs
             except Exception as exc:
-                logger.warning("RSS: nie udało się sprawdzić kandydata feedu %s: %s", candidate_feed, exc)
+                log.warning("RSS: nie udało się sprawdzić kandydata feedu %s: %s", candidate_feed, exc)
                 continue
 
         return self._from_html_listing(res, limit=limit, max_pages=max_pages)
@@ -594,7 +594,7 @@ class RssParser:
                     if published_at is None and art_pub is not None:
                         published_at = art_pub
                 except Exception as exc:
-                    logger.warning("RSS: nie udało się dociągnąć artykułu %s: %s", item.url, exc)
+                    log.warning("RSS: nie udało się dociągnąć artykułu %s: %s", item.url, exc)
 
             combined = normalize_text(f"{title}\n\n{text}" if text else title)
             if len(combined) < self.min_text_length:
@@ -683,7 +683,7 @@ class RssParser:
                     if len(docs) >= limit:
                         break
                 except Exception as exc:
-                    logger.warning("RSS(HTML): pominięto artykuł %s: %s", article_url, exc)
+                    log.warning("RSS(HTML): pominięto artykuł %s: %s", article_url, exc)
                     continue
 
             if len(docs) >= limit:
@@ -699,7 +699,7 @@ class RssParser:
             try:
                 current_res = self.fetcher.get(next_url)
             except Exception as exc:
-                logger.warning("RSS(HTML): błąd pobierania strony paginacji %s: %s", next_url, exc)
+                log.warning("RSS(HTML): błąd pobierania strony paginacji %s: %s", next_url, exc)
                 break
 
         return sort_latest(docs, limit=limit)

@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 router = APIRouter(prefix="/auth/x", tags=["X authorization"])
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 TOKEN_FILE = Path.home() / ".local/share/prawdowid/x-oauth.json"
 SCOPES = {"dm.read", "dm.write", "tweet.read", "users.read", "offline.access"}
 COOKIE = "prawdowid_x_oauth_state"
@@ -106,7 +106,7 @@ def get_http_client() -> Iterator[httpx.Client]:
 
 def check_response(response: httpx.Response) -> None:
     if not response.is_success:
-        logger.warning("X authorization request failed: HTTP %s", response.status_code)
+        log.warning("X authorization request failed: HTTP %s", response.status_code)
         raise HTTPException(502, f"X API zwróciło HTTP {response.status_code}. Spróbuj autoryzacji ponownie.")
     if len(response.content) > 64_000:
         raise HTTPException(502, "Odpowiedź X API przekracza limit rozmiaru.")
@@ -132,7 +132,7 @@ def save_authorization(token: TokenResponse, account: Account) -> None:
         os.replace(temporary, TOKEN_FILE)
         temporary = None
     except OSError as exc:
-        logger.error("Unable to persist X authorization")
+        log.error("Unable to persist X authorization")
         raise HTTPException(500, "Nie udało się bezpiecznie zapisać tokenów X.") from exc
     finally:
         if temporary is not None:
@@ -231,7 +231,7 @@ def authorization_callback(
         except ValidationError as exc:
             raise HTTPException(502, "X zwróciło nieprawidłowe dane konta.") from exc
     except httpx.RequestError as exc:
-        logger.error("Unable to connect to X during authorization")
+        log.error("Unable to connect to X during authorization")
         raise HTTPException(502, "Nie udało się połączyć z X. Spróbuj autoryzacji ponownie.") from exc
     if account.username.casefold() != "prawdowid":
         raise HTTPException(403, "Zatwierdzono inne konto. Zaloguj się jako @prawdowid i zacznij ponownie.")
@@ -255,7 +255,7 @@ def authorization_status() -> AuthorizationStatus:
         stored = StoredAuthorization.model_validate_json(TOKEN_FILE.read_bytes())
         expired = stored.expires_at <= datetime.now(timezone.utc)
     except (OSError, ValidationError, TypeError) as exc:
-        logger.error("Unable to read stored X authorization")
+        log.error("Unable to read stored X authorization")
         raise HTTPException(500, "Nie udało się odczytać zapisanej autoryzacji X.") from exc
     return AuthorizationStatus(
         authorized=True, username=stored.account.username,

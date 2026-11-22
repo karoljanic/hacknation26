@@ -27,7 +27,7 @@ from prawdowid.domain.evidence import (
     EvidenceSource,
 )
 from prawdowid.domain.fact_checks import FactCheckSource, TextSearchRequest
-from prawdowid.services.relevance import STOPWORDS, WORD, claim_terms, keywords, terms
+from prawdowid.services.relevance import claim_terms, keywords, terms
 from prawdowid.services.gov_connectors import GovConnectorFetcher, GovConnectorSelector
 
 MAX_CLAIMS_PER_SEARCH = 10
@@ -42,9 +42,6 @@ GOV_SEARCH_MIN_TERM_OVERLAP = 0.6
 GOV_SEARCH_SLUG = "gov-pl-search"
 ODYSEUSZ_SLUG = "msz-odyseusz"
 ODYSEUSZ_PUBLISHER = "Ministerstwo Spraw Zagranicznych (Odyseusz)"
-
-_STOPWORDS = STOPWORDS
-_WORD = WORD
 
 log = logging.getLogger(__name__)
 
@@ -71,9 +68,6 @@ class _EUvsDisinfoSearchResponse(BaseModel):
     results: list[_EUvsDisinfoSearchHit]
 
 
-_keywords = keywords
-
-
 def _salience(word: str) -> float:
     """Names ("Wrocław") and number-bearing words ("65-latkowie") identify a
     topic far better than common words; bare numbers are weak on their own
@@ -91,7 +85,7 @@ def _salience(word: str) -> float:
 
 
 def _keyword_variants(text: str) -> list[str]:
-    words = _keywords(text)
+    words = keywords(text)
     ranked = sorted(range(len(words)), key=lambda i: (-_salience(words[i]), i))
     variants: list[str] = []
     # Most salient words, kept in their original order (Google is word-order sensitive).
@@ -139,14 +133,11 @@ def search_queries(
     return queries[:max_queries]
 
 
-_terms = terms
-
-
 def is_relevant_hit(query: str, text: str) -> bool:
-    wanted = _terms(query)
+    wanted = terms(query)
     if not wanted:
         return False
-    return len(wanted & _terms(text)) / len(wanted) >= GOV_SEARCH_MIN_TERM_OVERLAP
+    return len(wanted & terms(text)) / len(wanted) >= GOV_SEARCH_MIN_TERM_OVERLAP
 
 
 def _merge_or_raise(results: Sequence[list[EvidenceItem] | BaseException]) -> list[EvidenceItem]:

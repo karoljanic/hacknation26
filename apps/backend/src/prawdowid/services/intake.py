@@ -17,9 +17,11 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from prawdowid.ai.adapters.decision import DecisionAdapter
 from prawdowid.ai.adapters.embedding import EmbeddingAdapter
 from prawdowid.ai.adapters.llm import ContentBlocked, StructuredResult
-from prawdowid.domain.claims import ClaimExtraction
+from prawdowid.ai.adapters.media import Media
+from prawdowid.domain.claims import ClaimExtraction, InputSegment
 from prawdowid.domain.enums import (
     Channel,
     ClaimKind,
@@ -27,9 +29,6 @@ from prawdowid.domain.enums import (
     RunStatus,
     SubmissionClaimRelation,
 )
-from prawdowid.ai.adapters.decision import DecisionAdapter
-from prawdowid.ai.adapters.media import Media
-from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.preparation import MediaReadout, PreparedInput
 from prawdowid.persistence import claims as claim_repo
 from prawdowid.persistence.models import Claim, Submission, SubmissionClaim, VerificationRun

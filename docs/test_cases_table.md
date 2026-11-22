@@ -1,6 +1,6 @@
 # Prawdowid – wyniki przypadków testowych
 
-Podsumowanie [test_cases.md](test_cases.md). Sekcja A pochodzi z interfejsu WWW. Sekcje B–I to rzeczywiste odpowiedzi lokalnego API (`POST /check`) z 22.11.2026. Surowe dane, wejścia, obrazy i skrypt do ponownego uruchomienia są w [data/eval/test_cases_run_2026-11-22/](data/eval/test_cases_run_2026-11-22/).
+Podsumowanie [test_cases.md](test_cases.md). Sekcja A pochodzi z interfejsu WWW. Sekcje B–I to rzeczywiste odpowiedzi lokalnego API (`POST /check`) z 22.11.2026. Surowe dane, wejścia, obrazy i skrypt do ponownego uruchomienia są w [data/eval/test_cases_run_2026-11-22/](../data/eval/test_cases_run_2026-11-22/).
 
 **Werdykty:** ✅ Potwierdzone · ❌ Fałszywe · ⚠️ Wprowadzające w błąd · ❔ Brak wystarczających dowodów · ➖ Nie podlega weryfikacji · ⛔ Brak werdyktu (odrzucone, doprecyzowanie)
 

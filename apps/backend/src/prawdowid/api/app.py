@@ -18,6 +18,7 @@ from prawdowid.api.verify import router as verify_router
 from prawdowid.api.x_auth import router as x_auth_router
 from prawdowid.persistence.db import get_session
 from prawdowid.security.injection_guard import get_injection_guard
+from prawdowid.services.x_bot import POLL_SECONDS_ENV
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ async def _preload_injection_guard() -> None:
 
 
 def _x_dm_bot_interval() -> float:
-    raw = os.environ.get("X_DM_POLL_SECONDS", "").strip()
+    raw = os.environ.get(POLL_SECONDS_ENV, "").strip()
     try:
         return max(0.0, float(raw)) if raw else 0.0
     except ValueError:

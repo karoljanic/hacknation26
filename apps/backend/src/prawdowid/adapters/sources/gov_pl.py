@@ -30,7 +30,7 @@ try:
 except ImportError:  # pragma: no cover - opcjonalna zależność do PDF
     PdfReader = None  # type: ignore[assignment]
 
-logger = logging.getLogger(__name__)
+log = logging.getLogger(__name__)
 
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
 ALLOWED_HOSTS = frozenset({"gov.pl", "www.gov.pl"})
@@ -684,7 +684,7 @@ class GovPlParser:
             except Exception as exc:
                 if page_idx == 0:
                     raise
-                logger.warning("gov.pl: błąd pobierania strony paginacji %s: %s", current_url, exc)
+                log.warning("gov.pl: błąd pobierania strony paginacji %s: %s", current_url, exc)
                 break
 
             if first_resource is None:
@@ -712,7 +712,7 @@ class GovPlParser:
                         if len(docs) >= limit:
                             break
                 except Exception as exc:
-                    logger.warning("gov.pl: pominięto artykuł %s: %s", article_url, exc)
+                    log.warning("gov.pl: pominięto artykuł %s: %s", article_url, exc)
                     continue
 
             if len(docs) >= limit:
@@ -768,7 +768,7 @@ class GovPlParser:
                     if pdf_text:
                         combined_sections.append(f"[Załącznik: {att_title}]\n{pdf_text}")
                 except Exception as exc:
-                    logger.warning("gov.pl: błąd załącznika %s: %s", att_url, exc)
+                    log.warning("gov.pl: błąd załącznika %s: %s", att_url, exc)
                     errors.append(f"Załącznik {att_url}: {exc}")
 
         full_text = normalize_text("\n\n".join(combined_sections))
