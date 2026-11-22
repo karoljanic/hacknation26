@@ -1,7 +1,7 @@
 # Prawdowid
 
-Szkielet projektu do weryfikacji informacji: React/Next.js, Python/FastAPI,
-Celery, RabbitMQ i PostgreSQL.
+Szkielet projektu do weryfikacji informacji: React/Next.js, Python/FastAPI
+i PostgreSQL.
 
 ## Status
 
@@ -46,11 +46,10 @@ docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.ca.yaml 
 Certyfikat nie jest zapisywany w obrazie. Plik override jest potrzebny tylko
 w środowiskach wymagających dodatkowego CA.
 
-## Lokalna autoryzacja konta X
+## Bot na X (wiadomości prywatne)
 
 API obsługuje OAuth 2.0 Authorization Code z PKCE (S256) dla konta
-`@prawdowid`. To autoryzacja konta, **nie uruchomiony odbiornik DM ani bot
-fact-checkujący**.
+`@prawdowid` i bota odpowiadającego na DM (opis niżej).
 
 1. W X Developer Console skonfiguruj aplikację jako „Web app, automated app
    or bot”. Włącz dostęp do odczytu i wysyłania DM.
@@ -75,8 +74,22 @@ Token dostępu i refresh token są zapisane atomowo w pliku o uprawnieniach
 `0600`, w wolumenie `x_auth_data` (bez szyfrowania na dysku). Nie dodawaj
 tokenów do Gita ani nie udostępniaj wolumenu. Poza Dockerem plik znajduje
 się w `~/.local/share/prawdowid/x-oauth.json`. `/auth/x/status` pokazuje
-wyłącznie nazwę konta i czas wygaśnięcia, nigdy tokeny. Odświeżanie tokenów
-i odbieranie/wysyłanie DM będą kolejnym etapem.
+wyłącznie nazwę konta i czas wygaśnięcia, nigdy tokeny.
+
+**Odpowiadanie na DM.** Ustaw w `.env` `X_DM_POLL_SECONDS=60` (puste = bot
+wyłączony) i przebuduj API. Co tyle sekund API pobiera nowe wiadomości do
+`@prawdowid` (`GET /2/dm_events`), sprawdza każdą tą samą ścieżką co
+`POST /check` (limity, ochrona przed prompt injection, cache odpowiedzi) i
+odpisuje w tej samej rozmowie: werdykt, wyjaśnienie, do dwóch źródeł i podpis
+odpowiedzi. Obsługiwane: tekst, link, zdjęcie oraz udostępniony wpis z X (jego
+treść i data przychodzą razem z DM, więc zrzut ekranu nie jest potrzebny).
+Każda wiadomość dostaje jedną odpowiedź: ostatnia obsłużona jest zapisana w
+`x-dm-state.json` obok tokenów, a przy pierwszym uruchomieniu wcześniejsze
+wiadomości są pomijane. Token dostępu (ważny 2 h) jest odświeżany
+automatycznie, a nowa para tokenów zapisywana przed użyciem. Każde
+odpytanie i odpowiedź zużywa płatne kredyty X API
+(`apps/backend/src/prawdowid/services/x_bot.py`,
+`apps/backend/src/prawdowid/adapters/channels/x_dm.py`).
 
 API w Compose nasłuchuje tylko na loopback i ma wyłączony access log, aby
 nie zapisywać kodów OAuth z callbacka. Nie wystawiaj tych endpointów
@@ -149,6 +162,13 @@ HF_HOME=~/.cache/prawdowid/hf python scripts/fetch_guardrails_models.py
 export HF_HOME=~/.cache/prawdowid/hf HF_HUB_OFFLINE=1
 ```
 
+Gdy huggingface.co jest niedostępne (np. proxy firmowe), obraz i tak się
+buduje, a API sprawdza pola samym Jev i zapisuje to ostrzeżeniem w logach. Bez
+klucza TypeSafe i bez modeli Guardrails `/check` odrzuca zgłoszenia.
+
+Za proxy z inspekcją TLS `deploy/compose.ca.yaml` przekazuje pakiet
+`NODE_EXTRA_CA_CERTS` jako sekret `build_ca` do pip i pobierania modeli.
+
 ### Komponenty zewnętrzne i licencje
 
 - [guardrails-ai](https://github.com/guardrails-ai/guardrails) (Apache-2.0) i
@@ -169,12 +189,31 @@ tych samych liczb i tej samej polaryzacji (`same_specifics`). Awaria lub limit
 embeddingów nie przerywa sprawdzenia — wtedy działa dopasowanie po dokładnym
 tekście, co odnotowuje `verification_run.models`.
 
+Jeśli jest klucz TypeSafe, dopasowanie po wektorze potwierdza jeszcze Jev
+(„czy to ta sama teza?”); gdy zaprzeczy albo jest niedostępny, powstaje nowa
+teza.
+
+## Cache odpowiedzi
+
+Ocena modelu jest ważna 1 dzień (`assessment.valid_until`) i zapisana razem z
+cytowanymi dowodami (`assessment.snapshot`). Ta sama teza (dokładnie albo po
+potwierdzonym podobieństwie) dostaje tę odpowiedź od razu, bez wyszukiwania i
+bez oceny, chyba że Jev uzna, że odpowiedź może zmienić się w ciągu dnia
+(„teraz”, pogoda, ostrzeżenia, utrudnienia). Nie są zapisywane odpowiedzi
+udzielone przy niedostępnym źródle ani sprawdzenia linku.
+
+Przesłany obraz dostaje embedding (`submission.media_embedding`, sam plik nie
+jest zapisywany) i zapisany, zanonimizowany odczyt. Ten sam obraz pomija
+odczyt przez model. Próg jest prawie zerowy (0,003): w pomiarach kopia po
+ponownej kompresji była w odległości 0,012, a ten sam wpis ze zmienionym
+słowem i liczbą w 0,016, więc luźniejszy próg mógłby podać cudzy tekst.
+
 ## Baza danych
 
 PostgreSQL 17 z rozszerzeniem pgvector (`pgvector/pgvector:0.8.1-pg17`).
 Schemat: `apps/backend/src/prawdowid/persistence/models.py`, migracje Alembic
 w `persistence/migrations`. W Compose usługa `migrate` wykonuje
-`alembic upgrade head` przed startem API i workerów.
+`alembic upgrade head` przed startem API.
 
 Graf dowodowy jest zapisany relacyjnie: węzły to tabele (`source`,
 `document`, `passage`, `claim`, `submission`, …), a krawędzie to tabele
@@ -185,10 +224,10 @@ Werdykt (`assessment`) jest oddzielony od statusu przetwarzania
 (`verification_run.status`: ok/tech_failure/needs_clarification/out_of_scope).
 
 Do pracy lokalnej z backendem poza kontenerem `deploy/compose.dev.yaml`
-publikuje porty bazy i RabbitMQ na localhost:
+publikuje port bazy na localhost:
 
 ```bash
-docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.dev.yaml up -d postgres rabbitmq
+docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.dev.yaml up -d postgres
 export DATABASE_URL=postgresql+psycopg://prawdowid:change-me-local@127.0.0.1:5432/prawdowid
 cd apps/backend && alembic upgrade head
 ```
@@ -245,7 +284,7 @@ niedostępne źródło w ograniczeniach danej tezy.
 ## Struktura
 
 - `apps/web` — interfejs Next.js.
-- `apps/backend/src/prawdowid` — API, domena, serwisy, adaptery i workery.
+- `apps/backend/src/prawdowid` — API, domena, serwisy i adaptery.
 - `apps/backend/src/prawdowid/ai/adapters` — osobne kontrakty LLM, decyzji i embeddingów.
 - `apps/backend/src/prawdowid/ai/instances` — implementacje Gemini i Jev.
 - `apps/backend/tests` — testy backendu.
@@ -253,18 +292,10 @@ niedostępne źródło w ograniczeniach danej tezy.
 - `data/sources/api` — statusy API/RSS dla adresów z `links.md` i instrukcje uruchomienia.
 - `deploy` — konfiguracja uruchomienia.
 
-### Workery
-
-Workery Celery nasłuchują osobnych kolejek. Zaimplementowane są zadania
-zasilania korpusu (`ingestion`) i tworzenia embeddingów (`embedding`);
-`fetch`, `claims`, `search`, `evidence` i `aggregate` nie mają jeszcze zadań.
-Szczegóły uruchamiania API i RSS z listy źródeł są w [katalogu API](data/sources/api/README.md).
-
-Przykład zwiększenia liczby workerów wyszukiwania:
-
-```bash
-docker compose --env-file .env -f deploy/compose.yaml up -d --scale worker-search=2
-```
+Sprawdzanie zgłoszeń działa w całości w API (`POST /check`), bez kolejki
+zadań. Zasilanie korpusu i embeddingi uruchamia się z CLI (sekcja „Korpus
+źródeł”). Szczegóły uruchamiania API i RSS z listy źródeł są w
+[katalogu API](data/sources/api/README.md).
 
 ## Adaptery AI
 
@@ -304,7 +335,7 @@ niezależnej kontroli. Błędy dostawców są przekazywane wywołującemu.
 
 Ustaw `GEMINI_API_KEY` lub `TYPESAFE_API_KEY` w środowisku, zależnie od
 wybranego przykładu. Klucze dla kontenerów można również wpisać do lokalnego,
-ignorowanego przez Git pliku `.env`; Compose przekazuje je workerom.
+ignorowanego przez Git pliku `.env`; Compose przekazuje je do API.
 
 ```bash
 cd apps/backend
@@ -351,7 +382,7 @@ kontenera. Nie wyłączaj weryfikacji TLS. Istniejący override
 Przykład można też uruchomić w kontenerze po zbudowaniu usług:
 
 ```bash
-docker compose --env-file .env -f deploy/compose.yaml run --rm --no-deps worker-claims python examples/ai_demo.py decision
+docker compose --env-file .env -f deploy/compose.yaml run --rm --no-deps api python examples/ai_demo.py decision
 ```
 
 Testy backendu nie wykonują zewnętrznych żądań: `pytest apps/backend/tests`.
@@ -452,7 +483,7 @@ fact-checki; nie tworzy recenzji i nie wydaje własnego werdyktu.
 Włącz **Fact Check Tools API** w projekcie Google Cloud i ustaw
 `FACTCHECK_API_KEY` w środowisku. W `.env.example` jest tylko puste pole;
 rzeczywisty klucz zapisuj wyłącznie lokalnie, nigdy w pliku przykładowym.
-Compose przekazuje zmienną workerom, ale nie frontendowi. Przykłady Python
+Compose przekazuje zmienną do API, ale nie frontendowi. Przykłady Python
 nie wczytują `.env` automatycznie: poza Compose trzeba przekazać zmienne
 środowiskowe samodzielnie.
 
@@ -512,7 +543,7 @@ i nie ponawia automatycznie żądań; błędy HTTP (w tym limity 429), sieciowe
 i błędne odpowiedzi są jawne. Limit odpowiedzi wynosi 2 MB, timeout operacji
 HTTP 10 s. Każde żądanie zużywa limit Google, a przygotowanie mediów/claims
 może naliczać koszt LLM. Ta integracja jest dostępna przez serwis i CLI;
-nie dodaje jeszcze zadań Celery ani endpointu API.
+nie dodaje osobnego endpointu API.
 
 Dokumentacja: [claims.search](https://developers.google.com/fact-check/tools/api/reference/rest/v1alpha1/claims/search),
 [claims.imageSearch](https://developers.google.com/fact-check/tools/api/reference/rest/v1alpha1/claims/imageSearch).
@@ -602,8 +633,8 @@ limit bajtów pobieranych przez transport.
 
 Dane EUvsDisinfo są materiałem źródłowym, nie automatycznym werdyktem.
 Adapter nie interpretuje zdalnych opisów jako instrukcji i nie wywołuje LLM
-ani innych narzędzi. Jest dostępny z kodu i CLI; nie dodaje jeszcze indeksu,
-autonomicznego routingu LLM ani zadań Celery.
+ani innych narzędzi. Jest dostępny z kodu i CLI; nie dodaje jeszcze indeksu
+ani autonomicznego routingu LLM.
 
 ## Korpus źródeł
 
@@ -692,22 +723,13 @@ python -m prawdowid.ingestion embed --limit 500          # wymaga GEMINI_API_KEY
 python -m prawdowid.ingestion stats                      # stan korpusu wobec wymagań (100 dok., 10 domen, 2 typy)
 ```
 
-Te same operacje są dostępne jako zadania Celery: `ingestion.ingest_source`
-i `ingestion.ingest_all` (kolejka `ingestion`, `ingest_all` synchronizuje katalog
-i tworzy osobne zadanie dla każdego źródła) oraz `embedding.embed_pending`
-(kolejka `embedding`, worker `worker-embedding`). Harmonogram (cron/beat) nie
-jest jeszcze skonfigurowany. W Compose katalog jest montowany do workerów
-tylko do odczytu (`PRAWDOWID_CATALOG`).
+W Compose te same polecenia można uruchomić w kontenerze API, np.
+`docker compose --env-file .env -f deploy/compose.yaml run --rm --no-deps api python -m prawdowid.ingestion stats`.
+Katalog jest montowany tylko do odczytu (`PRAWDOWID_CATALOG`).
 
-```bash
-celery -A prawdowid.workers.celery_app call ingestion.ingest_source --args='["gov-rcb"]'
-celery -A prawdowid.workers.celery_app call embedding.embed_pending --args='["passage", 200]'
-```
-
-**Dziennik zadań.** Każde wykonanie zadania Celery i każde polecenie CLI
-zmieniające dane (`sync-catalog`, `ingest`, `embed`) zapisuje wiersz w tabeli
-`job_run`: nazwę, wyzwalacz (`celery`/`cli`), identyfikator zadania Celery,
-workera, parametry, czas trwania, podsumowanie (pobrane / nowe / niezmienione /
+**Dziennik zadań.** Każde polecenie CLI zmieniające dane (`sync-catalog`,
+`ingest`, `embed`) zapisuje wiersz w tabeli `job_run`: nazwę, wyzwalacz
+(`cli`), hosta, parametry, czas trwania, podsumowanie (pobrane / nowe / niezmienione /
 pominięte / błędne dokumenty, fragmenty, embeddingi), zgłoszone problemy oraz —
 przy awarii — wyjątek z tracebackiem. Status: `ok`, `problems` (zakończone, ale
 z błędami lub częściowo) albo `failed`. Wiersz powstaje przed rozpoczęciem pracy,

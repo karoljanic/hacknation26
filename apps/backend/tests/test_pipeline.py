@@ -513,3 +513,96 @@ def test_cancellation_closes_the_run_and_propagates() -> None:
 
     assert run.status == RunStatus.TECH_FAILURE and run.finished_at is not None
     assert "anulowane" in run.error
+
+
+def decision_scoring(score: float) -> Mock:
+    from prawdowid.ai.adapters.decision import BooleanAnswer, DecisionResult
+
+    decision = Mock()
+    decision.decide.side_effect = lambda state, questions: DecisionResult(
+        model="jev", input_tokens=1, output_tokens=1,
+        answers={key: BooleanAnswer(type="noul", noul=score) for key in questions},
+    )
+    return decision
+
+
+def cached_answer(item: EvidenceItem) -> dict:
+    from prawdowid.services.answer_cache import snapshot_of
+
+    assessment = ClaimAssessmentOutput(
+        claim_id="old", verdict="false", strength="strong",
+        reasons=AssessmentReasons(source_tiers=[2], independent_sources=1, conflicting_sources=False),
+        explanation="Demagog ocenił tezę jako fałsz.",
+        citations=[{"evidence_index": 1, "quote": item.snippet, "relation": "refutes"}],
+    )
+    unrelated = evidence_item("https://example.org/inne")
+    return snapshot_of(assessment, [EvidenceForAssessment(item=unrelated, text="x", fully_fetched=False),
+                                    EvidenceForAssessment(item=item, text=item.snippet, fully_fetched=False)])
+
+
+@pytest.mark.parametrize("time_score, reused", [(0.1, True), (0.9, False)])
+def test_a_valid_stored_answer_is_reused_unless_time_critical(monkeypatch, time_score: float, reused: bool) -> None:
+    run_id, claim_id = uuid.uuid4(), uuid.uuid4()
+    known = dataclasses.replace(stored(claim_id, "Rząd podniósł VAT."), match="exact")
+    intake = Mock()
+    intake.submit_text.return_value = intake_result(RunStatus.OK, [known], run_id=run_id)
+    item = evidence_item()
+    monkeypatch.setattr("prawdowid.services.pipeline.latest_valid", lambda session, cid, now: (uuid.uuid4(), cached_answer(item)))
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(
+        return_value=EvidenceSearchResult(claims=[ClaimEvidence(claim_id=str(claim_id), items=[])], skipped_opinion_ids=[])
+    )
+    pipeline = make_pipeline(
+        run=VerificationRun(id=run_id, status=RunStatus.RUNNING, pipeline_version="t"),
+        intake=intake, evidence_search=evidence_search,
+    )
+    pipeline.cache_decision = decision_scoring(time_score)
+
+    result = asyncio.run(pipeline.run_text("Rząd podniósł VAT.", channel=Channel.WEB))
+
+    [outcome] = result.claims
+    searched = evidence_search.search.call_args.args[0]
+    if reused:
+        assert searched == [] and outcome.judged_by.startswith("cache:")
+        assert outcome.assessment.verdict == "false" and outcome.assessment.claim_id == str(claim_id)
+        assert outcome.evidence[outcome.assessment.citations[0].evidence_index].item.url == item.url
+    else:
+        assert [claim.id for claim in searched] == [str(claim_id)]
+        assert outcome.judged_by == "deterministic:no_evidence"
+
+
+def test_model_answers_are_stored_for_a_day_with_their_cited_evidence(monkeypatch) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    run_id, claim_id = uuid.uuid4(), uuid.uuid4()
+    intake = Mock()
+    intake.submit_text.return_value = intake_result(RunStatus.OK, [stored(claim_id, "Rząd podniósł VAT.")], run_id=run_id)
+    item = evidence_item()
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(
+        return_value=EvidenceSearchResult(claims=[ClaimEvidence(claim_id=str(claim_id), items=[item])], skipped_opinion_ids=[])
+    )
+    sublinks = Mock()
+    sublinks.select.return_value = [EvidenceForAssessment(item=item, text=item.snippet, fully_fetched=False)]
+    assessment = Mock()
+    assessment.assess.return_value = Mock(
+        requested_model="m", model_version="v", input_tokens=1, output_tokens=1,
+        data=SubmissionAssessmentOutput(assessments=[ClaimAssessmentOutput(
+            claim_id=str(claim_id), verdict="false", strength="strong",
+            reasons=AssessmentReasons(source_tiers=[2], independent_sources=1, conflicting_sources=False),
+            explanation="Demagog ocenił tezę jako fałsz.",
+            citations=[{"evidence_index": 0, "quote": item.snippet, "relation": "refutes"}],
+        )]),
+    )
+    record_outcome = Mock()
+    monkeypatch.setattr("prawdowid.persistence.evidence.record_outcome", record_outcome)
+    pipeline = make_pipeline(
+        run=VerificationRun(id=run_id, status=RunStatus.RUNNING, pipeline_version="t"),
+        intake=intake, evidence_search=evidence_search, sublinks=sublinks, assessment=assessment,
+    )
+
+    asyncio.run(pipeline.run_text("Rząd podniósł VAT.", channel=Channel.WEB))
+
+    kwargs = record_outcome.call_args.kwargs
+    assert abs(kwargs["valid_until"] - (datetime.now(timezone.utc) + timedelta(days=1))) < timedelta(minutes=1)
+    assert kwargs["snapshot"]["evidence"][0]["item"]["url"] == str(item.url)

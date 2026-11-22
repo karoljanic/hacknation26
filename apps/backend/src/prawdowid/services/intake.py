@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from prawdowid.ai.adapters.embedding import EmbeddingAdapter
@@ -26,12 +27,16 @@ from prawdowid.domain.enums import (
     RunStatus,
     SubmissionClaimRelation,
 )
+from prawdowid.ai.adapters.decision import DecisionAdapter
+from prawdowid.ai.adapters.media import Media
+from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.preparation import MediaReadout, PreparedInput
 from prawdowid.persistence import claims as claim_repo
 from prawdowid.persistence.models import Claim, Submission, SubmissionClaim, VerificationRun
 from prawdowid.security.redaction import redact
 from prawdowid.services.claims import ClaimExtractor, is_open_question
-from prawdowid.services.preparation import InputPreparer, NoExtractableContentError
+from prawdowid.services.answer_cache import same_claims
+from prawdowid.services.preparation import IMAGE_TYPES, InputPreparer, NoExtractableContentError
 from prawdowid.services.usage import estimate_cost, model_prices, usage_entry
 
 PIPELINE_VERSION = "intake-0.1"
@@ -46,6 +51,10 @@ log = logging.getLogger(__name__)
 # Provisional: cosine distance under which two claims of the same kind are
 # treated as the same claim. Needs calibration on real data.
 DEFAULT_SIMILARITY_THRESHOLD = 0.12
+# Image embeddings barely separate a re-encoded copy (0.012) from the same
+# post with a changed word and number (0.016): only the very same image reuses
+# an earlier reading.
+SAME_IMAGE_DISTANCE = 0.003
 
 _RELATION_BY_KIND = {
     ClaimKind.FACTUAL_CLAIM: SubmissionClaimRelation.STATES,
@@ -101,7 +110,10 @@ class ClaimIntake:
         similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
         retention: timedelta = timedelta(days=30),
         keep_run_open: bool = False,
+        decision: DecisionAdapter | None = None,
     ) -> None:
+        """``decision``: confirms that a claim found by vector similarity is
+        really the same claim before the two are merged."""
         self.session_factory = session_factory
         self.preparer = preparer
         self.extractor = extractor
@@ -113,6 +125,56 @@ class ClaimIntake:
         # ``running``, so a crash mid-check never leaves an "ok" run without
         # verdicts. The later stage closes it.
         self.keep_run_open = keep_run_open
+        self.decision = decision
+
+    def read_media(self, media: Media, *, source_name: str) -> PreparedInput:
+        """Reads an upload; the very same image submitted before (by embedding)
+        reuses that reading instead of calling the reading model again."""
+        vector = self._embed_media(media)
+        if vector is not None:
+            cached = self._cached_reading(*vector)
+            if cached is not None:
+                return cached
+        prepared = self.preparer.prepare_media(media, source_name=source_name)
+        if vector is None:
+            return prepared
+        return prepared.model_copy(update={"media_embedding": vector[0], "media_embedding_model": vector[1]})
+
+    def _embed_media(self, media: Media) -> tuple[list[float], str] | None:
+        if self.embedder is None or media.mime_type not in IMAGE_TYPES:
+            return None
+        try:
+            result = self.embedder.embed(media)
+        except Exception:
+            log.warning("Image embedding failed; reading the image without the cache", exc_info=True)
+            return None
+        return result.values, result.model
+
+    def _cached_reading(self, vector: list[float], model: str) -> PreparedInput | None:
+        with self.session_factory() as session:
+            distance = Submission.media_embedding.cosine_distance(vector)
+            row = session.execute(
+                select(Submission.media_reading, distance)
+                .where(
+                    Submission.media_embedding_model == model,
+                    Submission.media_reading.is_not(None),
+                    Submission.expires_at > datetime.now(timezone.utc),
+                )
+                .order_by(distance)
+                .limit(1)
+            ).first()
+        if row is None or row[1] > SAME_IMAGE_DISTANCE:
+            return None
+        reading = row[0]
+        log.info("Same image submitted before (distance %.4f): reusing its reading", row[1])
+        return PreparedInput(
+            segments=[InputSegment.model_validate(segment) for segment in reading["segments"]],
+            media_description=reading.get("description"),
+            media_text_complete=reading.get("text_complete"),
+            media_embedding=vector,
+            media_embedding_model=model,
+            reused_reading=True,
+        )
 
     # -- entry points (one per input type) -------------------------------- #
 
@@ -176,6 +238,8 @@ class ClaimIntake:
             prepared = prepare()
             prepared = self._redact_segments(prepared)
             media = _media_readout(prepared)
+            if prepared.media_embedding is not None:
+                self._remember_media(submission_id, prepared, media, models)
             # Keep the user's own (media-read) text; for URLs store only the
             # link, never a copy of the article.
             if redacted_text is None and url is None:
@@ -232,6 +296,26 @@ class ClaimIntake:
             submission_id, run_id, RunStatus.OK, stored, input_text=input_text,
             source_url=url, source_text=source_text, media=media,
         )
+
+    def _remember_media(
+        self, submission_id: uuid.UUID, prepared: PreparedInput, media: MediaReadout | None,
+        models: list[dict[str, Any]],
+    ) -> None:
+        models.append({"role": "embedding", "model": prepared.media_embedding_model, "calls": 1, "input": "image"})
+        if prepared.reused_reading:
+            models.append({"role": "preparation", "cached": True})
+        with self.session_factory() as session, session.begin():
+            submission = session.get_one(Submission, submission_id)
+            submission.media_embedding = prepared.media_embedding
+            submission.media_embedding_model = prepared.media_embedding_model
+            submission.media_reading = {
+                # Only the (redacted) image text: never the asker's own question.
+                "segments": [
+                    segment.model_dump(mode="json") for segment in prepared.segments if segment.origin in MEDIA_ORIGINS
+                ],
+                "description": media.description if media else None,
+                "text_complete": media.text_complete if media else True,
+            }
 
     @staticmethod
     def _redact_segments(prepared: PreparedInput) -> PreparedInput:
@@ -294,10 +378,13 @@ class ClaimIntake:
     ) -> list[StoredClaim]:
         stored: list[StoredClaim] = []
         links: dict[uuid.UUID, SubmissionClaim] = {}
+        confirmed = self._confirm_similar(extraction, embeddings)
         with self.session_factory() as session, session.begin():
-            for extracted, vector in zip(extraction.data.claims, embeddings, strict=True):
+            for index, (extracted, vector) in enumerate(zip(extraction.data.claims, embeddings, strict=True)):
                 kind = ClaimKind(extracted.kind)
-                claim, match = self._get_or_create(session, extracted.text, kind, vector)
+                claim, match = self._get_or_create(
+                    session, extracted.text, kind, vector, allow_similar=confirmed is None or index in confirmed
+                )
                 references = [ref.model_dump(mode="json") for ref in extracted.references]
                 link = links.get(claim.id)
                 if link is None:
@@ -336,17 +423,48 @@ class ClaimIntake:
                 )
         return stored
 
+    def _confirm_similar(
+        self, extraction: StructuredResult[ClaimExtraction], embeddings: list[tuple[list[float], str] | None]
+    ) -> set[int] | None:
+        """Indices of claims whose nearest stored claim the decision model
+        confirmed as the same claim; None without a decision model (then the
+        vector distance and the numbers/negation check decide alone)."""
+        if self.decision is None:
+            return None
+        pairs: dict[str, tuple[str, str]] = {}
+        with self.session_factory() as session:
+            for index, (extracted, vector) in enumerate(zip(extraction.data.claims, embeddings, strict=True)):
+                kind = ClaimKind(extracted.kind)
+                if vector is None or claim_repo.find_exact(session, extracted.text, kind) is not None:
+                    continue
+                similar = self._similar(session, extracted.text, kind, vector)
+                if similar is not None:
+                    pairs[str(index)] = (extracted.text, similar.canonical_text)
+        return {int(key) for key in same_claims(self.decision, pairs)}
+
+    def _similar(
+        self, session: Session, text: str, kind: ClaimKind, vector: tuple[list[float], str]
+    ) -> Claim | None:
+        similar = claim_repo.find_similar(
+            session, vector[0], kind=kind, embedding_model=vector[1], max_distance=self.similarity_threshold
+        )
+        if similar is not None and claim_repo.same_specifics(text, similar[0].canonical_text):
+            return similar[0]
+        return None
+
     def _get_or_create(
         self,
         session: Session,
         text: str,
         kind: ClaimKind,
         vector: tuple[list[float], str] | None,
+        *,
+        allow_similar: bool = True,
     ) -> tuple[Claim, str]:
         existing = claim_repo.find_exact(session, text, kind)
         if existing is not None:
             return existing, "exact"
-        if vector is not None:
+        if vector is not None and allow_similar:
             similar = claim_repo.find_similar(
                 session,
                 vector[0],

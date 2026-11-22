@@ -32,7 +32,13 @@ def main() -> None:
     cache = Path(constants.HF_HUB_CACHE)
     for repo, revision in MODELS.items():
         patterns = TOKENIZER_FILES if repo == "google-bert/bert-base-cased" else [*TOKENIZER_FILES, "model.safetensors"]
-        snapshot_download(repo, revision=revision, allow_patterns=patterns)
+        try:
+            snapshot_download(repo, revision=revision, allow_patterns=patterns)
+        except Exception as exc:
+            # The image still builds (e.g. behind a proxy blocking huggingface.co);
+            # the API then screens with JEV only and logs it.
+            print(f"WARNING: cannot download {repo} ({exc}); the Guardrails detector will be unavailable")
+            return
         ref = cache / f"models--{repo.replace('/', '--')}" / "refs" / "main"
         ref.parent.mkdir(parents=True, exist_ok=True)
         ref.write_text(revision)

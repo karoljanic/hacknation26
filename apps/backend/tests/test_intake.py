@@ -231,3 +231,68 @@ def test_intake_can_leave_the_run_open_for_later_stages(cleanup: list[uuid.UUID]
         run = session.get_one(VerificationRun, result.run_id)
         assert run.status is RunStatus.RUNNING and run.finished_at is None
         assert run.models[0]["role"] == "extraction"  # usage is already recorded
+
+
+def jev(score: float):
+    from unittest.mock import Mock
+
+    from prawdowid.ai.adapters.decision import BooleanAnswer, DecisionResult
+
+    decision = Mock()
+    decision.decide.side_effect = lambda state, questions: DecisionResult(
+        model="jev", input_tokens=1, output_tokens=1,
+        answers={key: BooleanAnswer(type="noul", noul=score) for key in questions},
+    )
+    return decision
+
+
+@pytest.mark.parametrize("score, merged", [(0.9, True), (0.1, False)])
+def test_similar_claims_are_merged_only_when_the_decision_model_confirms(
+    cleanup: list[uuid.UUID], score: float, merged: bool
+) -> None:
+    tag = uuid.uuid4().hex[:8]
+    embedder = FakeEmbedder()
+    first = make_intake(FakeLLM([(f"{tag} Rząd podniósł VAT.", "factual_claim")]), embedder).submit_text(
+        "x", channel=Channel.WEB
+    )
+    intake = make_intake(FakeLLM([(f"{tag} Rząd obniżył VAT.", "factual_claim")]), embedder)
+    intake.decision = jev(score)
+    second = intake.submit_text("x", channel=Channel.WEB)
+    cleanup.extend([first.submission_id, second.submission_id])
+
+    assert (second.claims[0].claim_id == first.claims[0].claim_id) is merged
+    assert second.claims[0].match.startswith("similar") is merged
+
+
+def test_the_same_image_reuses_its_earlier_reading(cleanup: list[uuid.UUID]) -> None:
+    from unittest.mock import Mock
+
+    from prawdowid.ai.adapters.media import Media
+    from prawdowid.domain.claims import InputSegment
+    from prawdowid.domain.preparation import PreparedInput
+
+    tag = uuid.uuid4().hex[:8]
+    axis = int(tag, 16) % EMBEDDING_DIM
+
+    class ImageEmbedder:
+        def embed(self, content) -> EmbeddingResult:
+            vector = [0.0] * EMBEDDING_DIM
+            vector[axis] = 1.0
+            return EmbeddingResult(vector, f"fake-image-{tag}")
+
+    intake = make_intake(FakeLLM([(f"{tag} VAT wynosi 23%.", "factual_claim")]), ImageEmbedder())
+    intake.preparer = Mock()
+    intake.preparer.prepare_media.return_value = PreparedInput(
+        segments=[InputSegment(id="media-1", text=f"{tag} VAT wynosi 23%. Tel. 600123456", origin="ocr")],
+        media_description="Zrzut ekranu wpisu.", media_text_complete=True,
+    )
+    image = Media(data=b"png", mime_type="image/png")
+
+    first = intake.submit_deferred(lambda: intake.read_media(image, source_name="a.png"), channel=Channel.WEB)
+    second = intake.submit_deferred(lambda: intake.read_media(image, source_name="a.png"), channel=Channel.WEB)
+    cleanup.extend([first.submission_id, second.submission_id])
+
+    intake.preparer.prepare_media.assert_called_once()
+    assert second.media is not None and second.media.description == "Zrzut ekranu wpisu."
+    assert "600123456" not in second.media.text  # the stored reading is redacted
+    assert second.claims[0].claim_id == first.claims[0].claim_id

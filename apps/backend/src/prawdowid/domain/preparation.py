@@ -49,3 +49,8 @@ class PreparedInput(BaseModel):
     notes: list[str] = Field(default_factory=list)
     media_description: str | None = None
     media_text_complete: bool | None = None
+    # Embedding of an uploaded image; ``reused_reading`` when its text came
+    # from an earlier submission of the very same image.
+    media_embedding: list[float] | None = None
+    media_embedding_model: str | None = None
+    reused_reading: bool = False

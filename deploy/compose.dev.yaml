@@ -1,14 +1,10 @@
-# Development override: publishes PostgreSQL and RabbitMQ on localhost so the
-# API, workers and web app can run natively from the nix dev shell.
+# Development override: publishes PostgreSQL on localhost so the API and web
+# app can run natively from the nix dev shell.
 #
-#   docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.dev.yaml up postgres rabbitmq
+#   docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.dev.yaml up postgres
 #
 # (inside `nix develop` this is the `dev-services` command)
 services:
   postgres:
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
-
-  rabbitmq:
-    ports:
-      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"

@@ -12,6 +12,7 @@ documents in full (see ``_stores_full_text``).
 
 import logging
 import uuid
+from typing import Any
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -236,7 +237,13 @@ def _record_citation(
 
 
 def record_outcome(
-    session: Session, *, run_id: uuid.UUID, claim_id: uuid.UUID, outcome: ClaimOutcome
+    session: Session,
+    *,
+    run_id: uuid.UUID,
+    claim_id: uuid.UUID,
+    outcome: ClaimOutcome,
+    valid_until: datetime | None = None,
+    snapshot: dict[str, Any] | None = None,
 ) -> Assessment:
     """Writes one ``Assessment`` row (always) plus ``Evidence``/``Document``/
     ``Passage`` rows for every cited item (only when there are citations)."""
@@ -249,6 +256,8 @@ def record_outcome(
         explanation=outcome.assessment.explanation,
         limitations=outcome.assessment.limitations,
         pipeline_version=PIPELINE_VERSION,
+        valid_until=valid_until,
+        snapshot=snapshot,
     )
     session.add(assessment)
     session.flush()

@@ -1,27 +1,5 @@
 name: prawdowid
 
-x-worker: &worker
-  build:
-    context: ../apps/backend
-  environment:
-    RABBITMQ_HOST: rabbitmq
-    RABBITMQ_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
-    RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
-    GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-    TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
-    FACTCHECK_API_KEY: ${FACTCHECK_API_KEY:-}
-    EUVSDISINFO_API_KEY: ${EUVSDISINFO_API_KEY:-}
-    DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-    PRAWDOWID_CATALOG: /app/data/sources/catalog.toml
-  volumes:
-    # Source catalogue lives outside the backend build context; read-only.
-    - ../data/sources:/app/data/sources:ro
-  depends_on:
-    rabbitmq:
-      condition: service_healthy
-    migrate:
-      condition: service_completed_successfully
-
 services:
   postgres:
     # Postgres 17 with the pgvector extension (embeddings for passages/claims).
@@ -38,23 +16,9 @@ services:
       timeout: 5s
       retries: 12
 
-  rabbitmq:
-    image: rabbitmq:4-alpine
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER in .env}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
-    healthcheck:
-      # Run as the rabbitmq user: run as root, the CLI creates a root-owned
-      # ~/.erlang.cookie if it runs before the server (Podman runs the first
-      # check immediately), and the server then fails with "eacces".
-      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
   # One-shot: applies Alembic migrations, then syncs the auditable source
   # catalogue (data/sources/catalog.toml, mounted read-only) before the API
-  # and workers start.
+  # starts.
   migrate:
     build:
       context: ../apps/backend
@@ -97,6 +61,8 @@ services:
       INJECTION_GUARDRAILS_THRESHOLD: ${INJECTION_GUARDRAILS_THRESHOLD:-0.81}
       CHECK_TRUST_FORWARDED_FOR: ${CHECK_TRUST_FORWARDED_FOR:-}
       PRAWDOWID_SIGNING_KEY: ${PRAWDOWID_SIGNING_KEY:-}
+      # Answer DMs to @prawdowid every N seconds (empty: off). Each poll uses X API credits.
+      X_DM_POLL_SECONDS: ${X_DM_POLL_SECONDS:-}
     command: ["uvicorn", "prawdowid.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     volumes:
       - x_auth_data:/home/app/.local/share/prawdowid
@@ -115,34 +81,6 @@ services:
       API_URL: http://api:8000
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
-
-  worker-fetch:
-    <<: *worker
-    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "fetch", "--concurrency=1", "--hostname=fetch@%h"]
-
-  worker-claims:
-    <<: *worker
-    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "claims", "--concurrency=1", "--hostname=claims@%h"]
-
-  worker-search:
-    <<: *worker
-    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "search", "--concurrency=1", "--hostname=search@%h"]
-
-  worker-evidence:
-    <<: *worker
-    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "evidence", "--concurrency=1", "--hostname=evidence@%h"]
-
-  worker-aggregate:
-    <<: *worker
-    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "aggregate", "--concurrency=1", "--hostname=aggregate@%h"]
-
-  worker-ingestion:
-    <<: *worker
-    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "ingestion", "--concurrency=1", "--hostname=ingestion@%h"]
-
-  worker-embedding:
-    <<: *worker
-    command: ["celery", "-A", "prawdowid.workers.celery_app", "worker", "-Q", "embedding", "--concurrency=1", "--hostname=embedding@%h"]
 
 volumes:
   postgres_data:

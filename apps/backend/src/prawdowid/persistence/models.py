@@ -239,9 +239,9 @@ class JobRun(Base):
 
     id: Mapped[uuid.UUID] = uuid_pk()
     name: Mapped[str] = mapped_column(String(100))  # e.g. "ingestion.ingest_source", "cli.embed"
-    trigger: Mapped[str] = mapped_column(String(16))  # "celery" | "cli"
-    task_id: Mapped[str | None] = mapped_column(String(64), index=True)  # Celery task id
-    worker: Mapped[str | None] = mapped_column(String(200))  # Celery hostname / host
+    trigger: Mapped[str] = mapped_column(String(16))  # "cli"
+    task_id: Mapped[str | None] = mapped_column(String(64), index=True)  # external task id, if any
+    worker: Mapped[str | None] = mapped_column(String(200))  # host
     status: Mapped[JobStatus] = mapped_column(
         str_enum(JobStatus, "job_status"), server_default=JobStatus.RUNNING.value, index=True
     )
@@ -364,7 +364,10 @@ class Assessment(Base):
     """A verdict on a claim at a point in time, derived from explicit evidence."""
 
     __tablename__ = "assessment"
-    __table_args__ = (Index("ix_assessment_claim_as_of", "claim_id", text("as_of DESC")),)
+    __table_args__ = (
+        Index("ix_assessment_claim_as_of", "claim_id", text("as_of DESC")),
+        Index("ix_assessment_claim_valid_until", "claim_id", "valid_until"),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     claim_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("claim.id", ondelete="CASCADE"))
@@ -383,6 +386,9 @@ class Assessment(Base):
     as_of: Mapped[datetime] = created_at()
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pipeline_version: Mapped[str] = mapped_column(String(64))
+    # The full answer (assessment + cited evidence) so it can be returned again
+    # until ``valid_until`` without searching and assessing anew.
+    snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), deferred=True)
 
     claim: Mapped[Claim] = relationship(back_populates="assessments")
     evidence: Mapped[list[Evidence]] = relationship(secondary="assessment_evidence")
@@ -408,6 +414,14 @@ class Submission(Base):
     """An incoming question. Stores only redacted text and expires (retention)."""
 
     __tablename__ = "submission"
+    __table_args__ = (
+        Index(
+            "ix_submission_media_embedding",
+            "media_embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"media_embedding": "vector_cosine_ops"},
+        ),
+    )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     channel: Mapped[Channel] = mapped_column(str_enum(Channel, "channel"))
@@ -417,6 +431,11 @@ class Submission(Base):
     redacted_text: Mapped[str | None] = mapped_column(Text)  # PII masked before insert
     url: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # Uploaded image: its embedding (the image itself is never stored) and the
+    # redacted reading, so the very same image skips reading by the model.
+    media_embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), deferred=True)
+    media_embedding_model: Mapped[str | None] = mapped_column(String(100))
+    media_reading: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), deferred=True)
 
     claims: Mapped[list["SubmissionClaim"]] = relationship(
         back_populates="submission", cascade="all, delete-orphan"

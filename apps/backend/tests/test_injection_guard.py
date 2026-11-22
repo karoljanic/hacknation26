@@ -141,3 +141,18 @@ def test_guardrails_blocks_classic_dan_and_passes_a_question() -> None:
     detector = GuardrailsDetector()
     assert detector.score(ENGLISH_DAN) >= detector.threshold
     assert detector.score(BENIGN[0]) < detector.threshold
+
+
+def test_missing_guardrails_models_leave_jev_screening(monkeypatch) -> None:
+    from prawdowid.security import injection_guard
+
+    def broken(**kwargs):
+        raise OSError("model files not found")
+
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+    monkeypatch.setattr(injection_guard, "GuardrailsDetector", broken)
+    assert [d.name for d in injection_guard._build_guard().detectors] == ["jev"]
+
+    monkeypatch.delenv("TYPESAFE_API_KEY")
+    with pytest.raises(injection_guard.InjectionGuardUnavailable):
+        injection_guard._build_guard()

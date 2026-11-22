@@ -33,18 +33,11 @@ type Claim = {
   answer_hash?: string | null;
 };
 
-type MediaInfo = {
-  description: string;
-  text: string;
-  text_complete: boolean;
-};
-
 type CheckResponse = {
   run_id: string;
   status: RunStatus;
   message: string | null;
   claims: Claim[];
-  media?: MediaInfo | null;
   skipped_claims?: string[];
   answer_hash?: string | null;
 };
@@ -138,7 +131,7 @@ type LoadingMode = "check" | "verify-image";
 type State =
   | { kind: "idle" }
   | { kind: "loading"; mode: LoadingMode }
-  | { kind: "needs-clarification"; message: string | null; media: MediaInfo | null }
+  | { kind: "needs-clarification"; message: string | null }
   | { kind: "out-of-scope"; message: string | null }
   | { kind: "busy"; message: string; retryAfter: number | null }
   | { kind: "invalid"; message: string }
@@ -146,7 +139,6 @@ type State =
   | {
     kind: "done";
     message: string | null;
-    media: MediaInfo | null;
     claims: Claim[];
     skipped: string[];
     answerHash: string | null;
@@ -331,14 +323,13 @@ export function CheckForm() {
         setState({
           kind: "done",
           message: payload.message ?? null,
-          media: payload.media ?? null,
           claims: payload.claims ?? [],
           skipped: payload.skipped_claims ?? [],
           answerHash: payload.answer_hash ?? null,
         });
         break;
       case "needs_clarification":
-        setState({ kind: "needs-clarification", message: payload.message ?? null, media: payload.media ?? null });
+        setState({ kind: "needs-clarification", message: payload.message ?? null });
         break;
       case "out_of_scope":
         setState({ kind: "out-of-scope", message: payload.message ?? null });
@@ -414,10 +405,10 @@ export function CheckForm() {
     type === "text"
       ? "Wklej wiadomość, wpis lub cytat albo zadaj pytanie, na które da się odpowiedzieć „tak” lub „nie”, np. „Czy we Włoszech ostatnio odbywał się strajk generalny?”. Nie podawaj danych osobowych."
       : type === "image"
-        ? "Co dokładnie chcesz sprawdzić? Jeśli wklejasz zrzut ekranu odpowiedzi Prawdowida z hashami, zweryfikujemy każdy kafelek osobno."
+        ? "Co dokładnie chcesz sprawdzić?"
         : type === "video"
-          ? "Co dokładnie chcesz sprawdzić? Na przykład: Czy to nagranie pokazuje tegoroczny protest?"
-          : "Co dokładnie chcesz sprawdzić? Na przykład: Czy ten artykuł podaje prawdziwe dane?";
+          ? "Co dokładnie chcesz sprawdzić?"
+          : "Co dokładnie chcesz sprawdzić?";
 
   return (
     <>
@@ -619,31 +610,6 @@ function SearchProgress({ mode }: { mode: LoadingMode }) {
   );
 }
 
-function MediaReadout({ media }: { media: MediaInfo }) {
-  return (
-    <section className="media-readout" aria-label="Co odczytano z pliku">
-      {media.description && (
-        <p className="media-readout__description">
-          <strong>Na pliku:</strong> {media.description}
-        </p>
-      )}
-      {media.text ? (
-        <details className="media-readout__text" open>
-          <summary>Odczytany tekst</summary>
-          <p>{media.text}</p>
-        </details>
-      ) : (
-        <p className="media-readout__empty">Nie odczytano żadnego tekstu.</p>
-      )}
-      {!media.text_complete && (
-        <p className="media-readout__warning">
-          Części tekstu nie udało się odczytać w całości. Sprawdź, czy niczego nie brakuje.
-        </p>
-      )}
-    </section>
-  );
-}
-
 function Result({ state }: { state: State }) {
   switch (state.kind) {
     case "invalid":
@@ -671,7 +637,6 @@ function Result({ state }: { state: State }) {
     case "needs-clarification":
       return (
         <div className="results">
-          {state.media && <MediaReadout media={state.media} />}
           <div className="alert alert--info">
             <p className="alert__title">Doprecyzuj zgłoszenie</p>
             <p>
@@ -753,7 +718,6 @@ function Result({ state }: { state: State }) {
       if (state.claims.length === 0) {
         return (
           <div className="results">
-            {state.media && <MediaReadout media={state.media} />}
             <div className="alert alert--info">
               <div className="alert__header">
                 <p className="alert__title">Brak twierdzeń do sprawdzenia</p>
@@ -766,7 +730,6 @@ function Result({ state }: { state: State }) {
       }
       return (
         <div className="results">
-          {state.media && <MediaReadout media={state.media} />}
           {state.message && (
             <div className="alert alert--info">
               <p>{state.message}</p>
@@ -828,7 +791,7 @@ function ClaimResult({ claim }: { claim: Claim }) {
         {claim.answer_hash && <HashBadge hash={claim.answer_hash} />}
         <span className="strength">{STRENGTH_LABEL[claim.strength]}</span>
         {claim.basis === "general_knowledge" && (
-          <span className="basis-badge">Wiedza ogólna – bez źródła</span>
+          <span className="basis-badge">Brak źródeł</span>
         )}
       </div>
       <p className="claim-result__explanation">{claim.explanation}</p>

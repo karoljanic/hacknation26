@@ -35,6 +35,8 @@ from prawdowid.services.assessment import (
     opinion_assessment,
     with_unavailable_sources,
 )
+from prawdowid.ai.adapters.decision import DecisionAdapter
+from prawdowid.services.answer_cache import ASSESSMENT_TTL, from_snapshot, latest_valid, snapshot_of, time_critical
 from prawdowid.services.claim_selection import ClaimSelection, ClaimSelector
 from prawdowid.services.evidence_search import EvidenceSearchOrchestrator
 from prawdowid.services.intake import CONTENT_BLOCKED_MESSAGE, ClaimIntake, IntakeResult, StoredClaim
@@ -86,7 +88,11 @@ class VerificationPipeline:
         usage_meter: UsageMeter | None = None,
         claim_selector: ClaimSelector | None = None,
         submitted_pages: SubmittedPageEvidence | None = None,
+        cache_decision: DecisionAdapter | None = None,
     ) -> None:
+        """``cache_decision``: decides which claims' stored answers may be reused
+        (not time-critical); without it every claim is checked anew."""
+        self.cache_decision = cache_decision
         self.usage_meter = usage_meter
         self.intake = intake
         self.evidence_search = evidence_search
@@ -192,9 +198,10 @@ class VerificationPipeline:
                 OPEN_QUESTION_MESSAGE, skipped_claims=skipped_texts,
             )
 
+        cached = await asyncio.to_thread(self._cached_outcomes, intake_result, by_id, claims)
         try:
             search_result = await self.evidence_search.search(
-                [claim for claim in claims if not claim.open_question]
+                [claim for claim in claims if not claim.open_question and claim.id not in cached]
             )
         except Exception:
             log.warning("Evidence search failed for run %s", intake_result.run_id, exc_info=True)
@@ -203,6 +210,10 @@ class VerificationPipeline:
                 EVIDENCE_SEARCH_FAILED_MESSAGE,
             )
 
+        if cached:
+            search_result = search_result.model_copy(
+                update={"claims": [evidence for evidence in search_result.claims if evidence.claim_id not in cached]}
+            )
         if intake_result.source_url and intake_result.source_text and self.submitted_pages is not None:
             search_result = await asyncio.to_thread(self._with_submitted_page, intake_result, claim_lookup, search_result)
 
@@ -213,6 +224,8 @@ class VerificationPipeline:
             )
             for claim in open_questions
         }
+        outcomes.update(cached)
+        cacheable: set[str] = set()
         for opinion_id in search_result.skipped_opinion_ids:
             stored = by_id[opinion_id]
             outcomes[opinion_id] = ClaimOutcome(
@@ -282,6 +295,8 @@ class VerificationPipeline:
             telemetry.injection_flags.extend(_injection_flags(assessed.data.injection_notes, bundle_evidence))
             judged_by = f"model:{assessed.requested_model}"
             unavailable = {ce.claim_id: ce.unavailable_sources for ce in with_evidence}
+            # An answer given while a source was down is not worth repeating.
+            cacheable = {claim_id for claim_id, sources in unavailable.items() if not sources}
             for claim_assessment in assessed.data.assessments:
                 stored = by_id[claim_assessment.claim_id]
                 outcomes[claim_assessment.claim_id] = ClaimOutcome(
@@ -292,7 +307,7 @@ class VerificationPipeline:
 
         ordered = [outcomes[claim_id] for claim_id in by_id if claim_id in outcomes]
         try:
-            await asyncio.to_thread(self._persist_outcomes, intake_result.run_id, by_id, ordered)
+            await asyncio.to_thread(self._persist_outcomes, intake_result.run_id, by_id, ordered, cacheable)
         except Exception:
             log.warning("Persisting assessments failed for run %s", intake_result.run_id, exc_info=True)
             return PipelineResult(
@@ -341,15 +356,67 @@ class VerificationPipeline:
                 selected=[claim.id for claim in claims[:limit]], skipped=[claim.id for claim in claims[limit:]]
             )
 
+    def _cached_outcomes(
+        self, intake_result: IntakeResult, by_id: dict[str, StoredClaim], claims: list[ClaimForVerification]
+    ) -> dict[str, ClaimOutcome]:
+        """Stored answers still valid for claims seen before, except those whose
+        answer can change within a day. A submitted link is always read anew."""
+        if self.cache_decision is None or intake_result.source_url:
+            return {}
+        now = datetime.now(timezone.utc)
+        found: dict[str, tuple[uuid.UUID, dict[str, Any]]] = {}
+        try:
+            with self.intake.session_factory() as session:
+                for claim in claims:
+                    if claim.open_question or by_id[claim.id].match == "new":
+                        continue
+                    hit = latest_valid(session, by_id[claim.id].claim_id, now)
+                    if hit is not None:
+                        found[claim.id] = hit
+        except Exception:
+            log.warning("Answer cache lookup failed for run %s", intake_result.run_id, exc_info=True)
+            return {}
+        if not found:
+            return {}
+        fresh_only = time_critical(self.cache_decision, {claim_id: by_id[claim_id].text for claim_id in found})
+        outcomes: dict[str, ClaimOutcome] = {}
+        for claim_id, (assessment_id, snapshot) in found.items():
+            if claim_id in fresh_only:
+                continue
+            try:
+                assessment, evidence = from_snapshot(snapshot, claim_id)
+            except Exception:
+                log.warning("Unreadable cached answer %s", assessment_id, exc_info=True)
+                continue
+            stored = by_id[claim_id]
+            log.info("Claim %s: reusing answer %s", claim_id, assessment_id)
+            outcomes[claim_id] = ClaimOutcome(
+                claim_id, stored.text, stored.kind.value, assessment, f"cache:{assessment_id}", evidence
+            )
+        return outcomes
+
     def _persist_outcomes(
-        self, run_id: uuid.UUID, by_id: dict[str, StoredClaim], ordered: list[ClaimOutcome]
+        self,
+        run_id: uuid.UUID,
+        by_id: dict[str, StoredClaim],
+        ordered: list[ClaimOutcome],
+        cacheable: set[str] = frozenset(),  # type: ignore[assignment]
     ) -> None:
         from prawdowid.persistence.evidence import record_outcome
 
+        valid_until = datetime.now(timezone.utc) + ASSESSMENT_TTL
         with self.intake.session_factory() as session, session.begin():
             for outcome in ordered:
+                # A reused answer is recorded for this run but does not extend its validity.
+                reused = outcome.judged_by.startswith("cache:")
+                snapshot = (
+                    snapshot_of(outcome.assessment, outcome.evidence)
+                    if outcome.claim_id in cacheable and outcome.judged_by.startswith("model:")
+                    else None
+                )
                 record_outcome(
-                    session, run_id=run_id, claim_id=by_id[outcome.claim_id].claim_id, outcome=outcome
+                    session, run_id=run_id, claim_id=by_id[outcome.claim_id].claim_id, outcome=outcome,
+                    valid_until=None if reused else valid_until, snapshot=snapshot,
                 )
 
     def _finish_run(self, run_id: uuid.UUID, result: PipelineResult, telemetry: "_RunTelemetry") -> None:

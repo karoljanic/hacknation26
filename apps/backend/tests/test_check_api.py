@@ -66,6 +66,9 @@ def stub_pipeline():
     pipeline.intake.preparer.prepare_url.return_value = PreparedInput(
         segments=[InputSegment(id="article-1", text="Treść przykładowego artykułu.", origin="article")]
     )
+    pipeline.intake.read_media.side_effect = lambda media, source_name: pipeline.intake.preparer.prepare_media(
+        media, source_name=source_name
+    )
     pipeline.intake.preparer.prepare_media.return_value = PreparedInput(
         segments=[InputSegment(id="ocr-1", text="Tekst odczytany z obrazu.", origin="ocr")]
     )
@@ -477,3 +480,8 @@ def test_social_media_link_asks_for_a_screenshot(url: str, stub_pipeline) -> Non
 def test_lookalike_domain_is_not_treated_as_social_media(stub_pipeline) -> None:
     post_check({"type": "url", "url": "https://notx.com/artykul"})
     stub_pipeline.run_url.assert_called_once()
+
+
+def test_image_is_read_through_the_intake_cache(stub_pipeline) -> None:
+    post_check({"type": "image"}, ("a.png", PNG, "image/png"))
+    stub_pipeline.intake.read_media.assert_called_once()

@@ -574,45 +574,6 @@ textarea.input {
   color: var(--color-muted);
 }
 
-.media-readout {
-  margin-bottom: 1rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  font-size: 0.9375rem;
-}
-
-.media-readout__description {
-  margin: 0;
-}
-
-.media-readout__text {
-  margin-top: 0.5rem;
-}
-
-.media-readout__text summary {
-  cursor: pointer;
-  font-weight: 700;
-}
-
-.media-readout__text p {
-  margin: 0.5rem 0 0;
-  white-space: pre-wrap;
-  color: var(--color-muted);
-}
-
-.media-readout__empty {
-  margin: 0.5rem 0 0;
-  color: var(--color-muted);
-}
-
-.media-readout__warning {
-  margin: 0.5rem 0 0;
-  padding: 0.4rem 0.6rem;
-  border: 1px dashed var(--color-warning-border);
-  background: var(--color-warning-bg);
-}
-
 .basis-badge {
   display: inline-block;
   padding: 0.15rem 0.5rem;

@@ -122,6 +122,7 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
             # intake falls back to exact-text matching (see ClaimIntake._embed).
             embedder=GeminiEmbeddingAdapter(genai_client, dimensions=EMBEDDING_DIM),
             keep_run_open=True,  # the pipeline closes the run after the verdicts
+            decision=decision,  # confirms vector matches as the same claim
         )
         catalog_entries = load_catalog().source
         gov_pl_entries = [entry for entry in catalog_entries if entry.collect.collector in CONNECTOR_COLLECTORS]
@@ -145,4 +146,5 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
             # Without a decision model every extracted claim is checked.
             claim_selector=ClaimSelector(decision=decision) if decision is not None else None,
             submitted_pages=SubmittedPageEvidence(entries=catalog_entries),
+            cache_decision=decision,  # stored answers reused unless time-critical
         )

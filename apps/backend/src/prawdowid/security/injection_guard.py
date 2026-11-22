@@ -174,7 +174,10 @@ def _build_guard() -> InjectionGuard:
     except InjectionGuardUnavailable:
         raise
     except Exception as exc:  # missing package or model files, load errors
-        raise InjectionGuardUnavailable(f"cannot load the Guardrails jailbreak detector: {exc}") from exc
+        if not detectors:
+            raise InjectionGuardUnavailable(f"cannot load the Guardrails jailbreak detector: {exc}") from exc
+        # E.g. the image was built where huggingface.co is blocked: JEV still screens.
+        log.warning("Guardrails jailbreak detector unavailable (%s): screening with JEV only", exc)
     return InjectionGuard(detectors)
 
 

@@ -1,10 +1,23 @@
+x-build-ca: &build-ca
+  build:
+    secrets:
+      - source: build_ca
+        target: build_ca
+
 services:
   web:
     build:
       secrets:
         - source: npm_ca
           target: npm_ca
+  migrate:
+    <<: *build-ca
+  api:
+    <<: *build-ca
 
 secrets:
   npm_ca:
+    file: ${NODE_EXTRA_CA_CERTS:?Set NODE_EXTRA_CA_CERTS to a trusted CA file}
+  # The same bundle, for pip and model downloads in the backend image.
+  build_ca:
     file: ${NODE_EXTRA_CA_CERTS:?Set NODE_EXTRA_CA_CERTS to a trusted CA file}

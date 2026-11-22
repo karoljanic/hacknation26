@@ -92,6 +92,7 @@ class Channel(StrEnum):
     WHATSAPP = "whatsapp"
     MESSENGER = "messenger"
     DEMO = "demo"
+    X = "x"  # direct messages to @prawdowid
 
 
 class RunStatus(StrEnum):

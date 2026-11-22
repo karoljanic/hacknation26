@@ -424,7 +424,7 @@ async def check(
                     else:
                         assert media is not None
                         try:
-                            prepared = preparer.prepare_media(
+                            prepared = pipeline.intake.read_media(
                                 Media(data=media, mime_type=mime_type), source_name=source_name
                             )
                         except NoExtractableContentError as exc:

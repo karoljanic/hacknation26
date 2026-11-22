@@ -10,7 +10,6 @@ requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.13,<2",
     "beautifulsoup4>=4.12,<5",
-    "celery>=5.4,<6",
     "fastapi>=0.115,<1",
     "google-genai>=2.33,<3",
     # Prompt-injection guard (security/injection_guard.py): Guardrails DetectJailbreak,

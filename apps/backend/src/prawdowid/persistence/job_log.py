@@ -1,6 +1,6 @@
-"""Persistent log of worker tasks and CLI commands (table ``job_run``).
+"""Persistent log of CLI commands (table ``job_run``).
 
-    with track_job("ingestion.ingest_source", trigger="celery", params={...}) as job:
+    with track_job("ingestion.ingest_source", trigger="cli", params={...}) as job:
         result = do_work(job_id=job.id)
         job.record({"new": 3, "skipped": 1}, problems=[...], ok=True)
 
