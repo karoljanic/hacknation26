@@ -149,7 +149,7 @@ export function AdminDashboard() {
     const [topicsPageNum, setTopicsPageNum] = useState<number>(1);
     const [topicsPageSize, setTopicsPageSize] = useState<number>(10);
 
-    const [token, setToken] = useState<string>("");
+    const [loggedIn, setLoggedIn] = useState(false);
     const [needsAuth, setNeedsAuth] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -163,13 +163,9 @@ export function AdminDashboard() {
 
     const apiFetch = useCallback(
         async (path: string, init?: RequestInit) => {
-            const headers = new Headers(init?.headers);
-            if (token.trim()) {
-                headers.set("x-admin-token", token.trim());
-            }
-            return fetch(`/api/admin/${path}`, { ...init, headers, cache: "no-store" });
+            return fetch(`/api/admin/${path}`, { ...init, cache: "no-store" });
         },
-        [token],
+        [],
     );
 
     const loadAll = useCallback(async () => {
@@ -228,8 +224,8 @@ export function AdminDashboard() {
     }, [apiFetch, windowVal, onlyUnresolved, minSubmissions, topicsPageNum, topicsPageSize]);
 
     useEffect(() => {
-        void loadAll();
-    }, [loadAll]);
+        if (loggedIn) void loadAll();
+    }, [loadAll, loggedIn]);
 
     async function handleDeleteSubmission(submissionId: string) {
         setBusyId(submissionId);
@@ -285,36 +281,19 @@ export function AdminDashboard() {
         }
     }
 
+    if (!loggedIn) {
+        return (
+            <button type="button" className="button" onClick={() => setLoggedIn(true)}>
+                Zaloguj do panelu
+            </button>
+        );
+    }
+
     if (needsAuth) {
         return (
-            <form
-                className="form"
-                onSubmit={(e) => {
-                    e.preventDefault();
-                    void loadAll();
-                }}
-            >
-                <div className="alert alert--info">
-                    <p className="alert__title">Wymagana autoryzacja panelu administratora</p>
-                    <p>Podaj token skonfigurowany w zmiennej środowiskowej PRAWDOWID_ADMIN_TOKEN.</p>
-                </div>
-                <div className="field">
-                    <label htmlFor="admin-token" className="field__label">
-                        Token administratora
-                    </label>
-                    <input
-                        id="admin-token"
-                        type="password"
-                        required
-                        className="input"
-                        value={token}
-                        onChange={(e) => setToken(e.target.value)}
-                    />
-                </div>
-                <button type="submit" className="button">
-                    Zaloguj do panelu
-                </button>
-            </form>
+            <div className="alert alert--error">
+                <p>Panel administratora nie jest skonfigurowany na serwerze.</p>
+            </div>
         );
     }
 
@@ -355,7 +334,7 @@ export function AdminDashboard() {
                         className="button button--secondary"
                         onClick={() => void handleDownload("export/analytics.json", "prawdowid-analiza-fimi.json")}
                     >
-                        Eksport JSON (DISARM/OpenCTI)
+                        Eksport JSON
                     </button>
                     <button type="button" className="button" onClick={() => void loadAll()} disabled={loading}>
                         {loading ? "Odświeżam…" : "Odśwież"}
@@ -413,7 +392,7 @@ export function AdminDashboard() {
                     className={`admin-tab ${tab === "quality" ? "admin-tab--active" : ""}`}
                     onClick={() => setTab("quality")}
                 >
-                    Jakość i przebiegi
+                    Jakość i przebiegi ({overview?.total_runs ?? runs.length})
                 </button>
                 <button
                     type="button"

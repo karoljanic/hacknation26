@@ -1,8 +1,10 @@
 // Server-side proxy to the backend's /admin/* endpoints.
-// Keeps API_URL off the client bundle. Forwards only the token the
-// administrator typed in: a server-side token would open the panel to anyone.
+// Keeps API_URL and PRAWDOWID_ADMIN_TOKEN off the client bundle. The panel
+// itself has no login of its own (demo): the server adds the token, so the
+// API stays closed to direct requests.
 
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
+const SERVER_ADMIN_TOKEN = process.env.PRAWDOWID_ADMIN_TOKEN ?? "";
 const TIMEOUT_MS = 30_000;
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 
@@ -23,8 +25,7 @@ async function forward(request: Request, context: RouteContext): Promise<Respons
     const contentType = request.headers.get("content-type");
     if (contentType) headers["content-type"] = contentType;
 
-    const token = request.headers.get("x-admin-token");
-    if (token) headers["x-admin-token"] = token;
+    if (SERVER_ADMIN_TOKEN) headers["x-admin-token"] = SERVER_ADMIN_TOKEN;
 
     try {
         const hasBody = request.method !== "GET" && request.method !== "HEAD";

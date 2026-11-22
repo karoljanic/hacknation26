@@ -100,9 +100,11 @@ przechowywane w pamięci jednego procesu API; po restarcie zacznij nową.
 
 Strona `/admin` (API `/admin/*`): metryki jakości, najczęstsze tematy, dziennik
 przebiegów, wykryte próby prompt injection (także zgłoszenia zablokowane na
-wejściu), usuwanie zgłoszeń, retencja i eksport CSV/JSON. Wymaga tokenu
-`PRAWDOWID_ADMIN_TOKEN` w `.env` (wpisywanego w panelu); bez niego panel jest
-wyłączony, bo pozwala usuwać dane.
+wejściu), usuwanie zgłoszeń, retencja i eksport CSV/JSON. Wejście to sam
+przycisk „Zaloguj do panelu”, bez hasła (wersja demonstracyjna): każdy, kto
+otworzy stronę, ma pełny dostęp. API `/admin/*` wymaga tokenu
+`PRAWDOWID_ADMIN_TOKEN` z `.env`, który dokleja serwer strony; bez tokenu panel
+jest wyłączony.
 
 ## Limity żądań
 
