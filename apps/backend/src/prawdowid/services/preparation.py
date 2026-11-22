@@ -9,6 +9,12 @@ from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.preparation import MediaReading, PreparedInput
 
 MAX_MEDIA_BYTES = 12_000_000
+# Length limits (characters) for what the user types into the form fields.
+# Over the limit is rejected, never cut. Text read from a linked article or an
+# uploaded file is not limited by these.
+MAX_TEXT_CHARS = 2000
+MAX_QUESTION_CHARS = 500  # the optional question sent with a link or a file
+MAX_URL_CHARS = 2000
 IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 AUDIO_TYPES = {"audio/wav", "audio/mpeg", "audio/mp3", "audio/aac", "audio/ogg", "audio/flac"}
 VIDEO_TYPES = {"video/mp4", "video/webm", "video/mov", "video/quicktime"}
@@ -95,6 +101,9 @@ class InputPreparer:
         self.fetcher = fetcher
 
     def prepare_text(self, text: str, *, question: bool = False) -> PreparedInput:
+        # Enforced here too (not only in the API) so every channel gets it.
+        if len(text) > MAX_TEXT_CHARS:
+            raise ValueError(f"Text exceeds the {MAX_TEXT_CHARS} character limit")
         return PreparedInput(
             segments=[
                 InputSegment(id="input-1", text=text, origin="question" if question else "text")

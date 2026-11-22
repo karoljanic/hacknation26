@@ -13,6 +13,10 @@ dependencies = [
     "celery>=5.4,<6",
     "fastapi>=0.115,<1",
     "google-genai>=2.33,<3",
+    # Prompt-injection guard (security/injection_guard.py): Guardrails DetectJailbreak,
+    # run locally. The Docker image installs the CPU-only torch build first.
+    "guardrails-ai>=0.11,<0.12",
+    "guardrails-ai-detect-jailbreak==0.1.6",
     "httpx>=0.27,<1",
     "mcp>=1.30,<2",
     "pgvector>=0.3,<1",
@@ -20,6 +24,8 @@ dependencies = [
     "pypdf>=5,<7",
     "python-multipart>=0.0.18,<1",
     "sqlalchemy>=2.0.30,<3",
+    "torch>=2.4",
+    "transformers>=5,<6",
     "typesafe-sdk>=0.7.5,<0.8",
     "uvicorn[standard]>=0.30,<1",
 ]

@@ -143,6 +143,29 @@ function validateFile(file: File, type: "image" | "video"): string | null {
   return null;
 }
 
+// Must match the backend limits in prawdowid/services/preparation.py.
+const MAX_TEXT_CHARS = 2000;
+const MAX_QUESTION_CHARS = 500;
+const MAX_URL_CHARS = 2000;
+
+function charsLeftLabel(left: number): string {
+  if (left === 1) return "Pozostał 1 znak";
+  const lastDigit = left % 10;
+  const lastTwo = left % 100;
+  if (lastDigit >= 2 && lastDigit <= 4 && (lastTwo < 12 || lastTwo > 14)) return `Pozostały ${left} znaki`;
+  return `Pozostało ${left} znaków`;
+}
+
+function CharCounter({ id, length, max }: { id: string; length: number; max: number }) {
+  const left = Math.max(0, max - length);
+  const nearLimit = left <= max * 0.1;
+  return (
+    <p id={id} className={`field__counter${nearLimit ? " field__counter--warn" : ""}`}>
+      {charsLeftLabel(left)} (z {max})
+    </p>
+  );
+}
+
 type Draft = { text: string; url: string; file: File | null };
 
 const EMPTY_DRAFT: Draft = { text: "", url: "", file: null };
@@ -344,6 +367,7 @@ export function CheckForm() {
     }
   }
 
+  const textMax = type === "text" ? MAX_TEXT_CHARS : MAX_QUESTION_CHARS;
   const textLabel =
     type === "text" ? "Treść lub pytanie do sprawdzenia" : "Pytanie (opcjonalnie)";
   const textHint =
@@ -390,11 +414,13 @@ export function CheckForm() {
               type="url"
               inputMode="url"
               required
+              maxLength={MAX_URL_CHARS}
               value={url}
               onChange={(event) => updateDraft({ url: event.target.value })}
-              aria-describedby={`${ids}-url-hint`}
+              aria-describedby={`${ids}-url-hint ${ids}-url-count`}
               className="input"
             />
+            <CharCounter id={`${ids}-url-count`} length={url.length} max={MAX_URL_CHARS} />
           </div>
         )}
 
@@ -445,13 +471,14 @@ export function CheckForm() {
           <textarea
             id={`${ids}-text`}
             rows={type === "text" ? 5 : 3}
-            maxLength={5000}
+            maxLength={textMax}
             required={type === "text"}
             value={text}
             onChange={(event) => updateDraft({ text: event.target.value })}
-            aria-describedby={`${ids}-text-hint`}
+            aria-describedby={`${ids}-text-hint ${ids}-text-count`}
             className="input"
           />
+          <CharCounter id={`${ids}-text-count`} length={text.length} max={textMax} />
         </div>
 
         {state.kind === "loading" ? (

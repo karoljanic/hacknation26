@@ -5,6 +5,11 @@ sent as multipart/form-data so files can be uploaded. The request and response
 schemas are the contract for the web app and the other channels; they appear
 in the OpenAPI docs at /docs.
 
+Before anything runs, every user-typed text field is screened for prompt
+injection and jailbreaks by JEV and the Guardrails ``DetectJailbreak``
+validator (``security.injection_guard``); a flagged field is rejected with 422
+and no run is opened.
+
 Pipeline: ``ClaimIntake`` (redaction, extraction, dedup, storage) is followed
 by ``EvidenceSearchOrchestrator`` (Google Fact Check + EUvsDisinfo, always in
 parallel), ``SublinkSelector`` (a decision call picks which results to fetch
@@ -14,6 +19,7 @@ returned as ``status=tech_failure`` with no claims, never as a fabricated
 merit result.
 """
 
+import asyncio
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
@@ -31,7 +37,15 @@ from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.enums import Channel, ClaimKind, RunStatus, Strength, Verdict
 from prawdowid.domain.preparation import PreparedInput
 from prawdowid.services.pipeline import PipelineResult, VerificationPipeline
-from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES, VIDEO_TYPES, NoExtractableContentError
+from prawdowid.services.preparation import (
+    IMAGE_TYPES,
+    MAX_MEDIA_BYTES,
+    MAX_QUESTION_CHARS,
+    MAX_TEXT_CHARS,
+    MAX_URL_CHARS,
+    VIDEO_TYPES,
+    NoExtractableContentError,
+)
 from prawdowid.security.attestation import (
     SignableClaim,
     compute_answer_hash,
@@ -40,13 +54,18 @@ from prawdowid.security.attestation import (
     get_signing_key,
     normalize_for_hash,
 )
+from prawdowid.security.injection_guard import InjectionGuard, get_injection_guard_factory
 
 router = APIRouter(tags=["check"], dependencies=[Depends(admit_check)])
 logger = logging.getLogger(__name__)
 
-MAX_TEXT_LENGTH = 5000
+MAX_TEXT_LENGTH = MAX_TEXT_CHARS
 TECH_FAILURE_MESSAGE = "Błąd techniczny podczas sprawdzania. Spróbuj ponownie później."
 INVALID_INPUT_MESSAGE = "Nie udało się odczytać treści do sprawdzenia."
+INJECTION_BLOCKED_MESSAGE = (
+    "Zgłoszenie wygląda na próbę zmiany działania systemu, a nie na treść do sprawdzenia. "
+    "Wpisz po prostu informację lub pytanie, które chcesz zweryfikować."
+)
 
 _HTTP_URL = TypeAdapter(HttpUrl)
 
@@ -268,7 +287,8 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
         "| `url` | `url` – link | `text` – pytanie do linku |\n"
         f"| `image` | `file` – {', '.join(sorted(IMAGE_TYPES))} | `text` – pytanie do obrazu |\n"
         f"| `video` | `file` – {', '.join(sorted(VIDEO_TYPES))} | `text` – pytanie do nagrania |\n\n"
-        f"Pliki do {MAX_MEDIA_BYTES // 1_000_000} MB, tekst do {MAX_TEXT_LENGTH} znaków.\n\n"
+        f"Pliki do {MAX_MEDIA_BYTES // 1_000_000} MB, tekst do {MAX_TEXT_LENGTH} znaków, "
+        f"pytanie do linku lub pliku do {MAX_QUESTION_CHARS} znaków, link do {MAX_URL_CHARS} znaków.\n\n"
         "Brak klucza API, limit dostawcy lub awaria sieci dają `status=tech_failure`, "
         "nigdy spreparowany werdykt. Walidacja (`413`, `415`, `422`) działa niezależnie. "
         "Liczba zgłoszeń jest ograniczona (`429`/`503` z `Retry-After`)."
@@ -294,18 +314,23 @@ async def check(
     pipeline_factory: Annotated[
         Callable[[], AbstractAsyncContextManager[VerificationPipeline]], Depends(get_pipeline_factory)
     ],
+    guard_factory: Annotated[Callable[[], InjectionGuard], Depends(get_injection_guard_factory)],
     input_type: Annotated[InputType, Form(alias="type", description="Rodzaj zgłoszenia.")],
     text: Annotated[
         str | None,
+        # No Form(max_length): multipart sends line breaks as CRLF, so the raw
+        # value is longer than what the user typed. Checked below after
+        # normalising line endings.
         Form(
-            max_length=MAX_TEXT_LENGTH,
-            description="Treść, pytanie albo pytanie do linku/pliku.",
+            description=f"Treść, pytanie albo pytanie do linku/pliku (do {MAX_TEXT_LENGTH} znaków; "
+            f"pytanie do linku/pliku do {MAX_QUESTION_CHARS} znaków).",
             examples=["Czy we Włoszech ostatnio odbywał się strajk generalny?"],
         ),
     ] = None,
     url: Annotated[
         str | None,
         Form(
+            max_length=MAX_URL_CHARS,
             description="Link (dla `type=url`; przy innych typach ignorowany).",
             examples=["https://example.org/artykul"],
         ),
@@ -313,6 +338,8 @@ async def check(
     file: Annotated[UploadFile | None, File(description="Obraz lub nagranie (dla `type=image`/`video`).")] = None,
     channel: Annotated[Channel, Form(description="Kanał, z którego przyszło zgłoszenie.")] = Channel.WEB,
 ) -> CheckResponse:
+    # Count characters the way the form shows them: one per line break.
+    text = text.replace("\r\n", "\n").replace("\r", "\n") if text else text
     text = text.strip() if text and text.strip() else None
     url = url.strip() if url and url.strip() else None
     has_file = file is not None and bool(file.filename)
@@ -320,6 +347,10 @@ async def check(
     if input_type in (InputType.TEXT, InputType.QUESTION):
         if text is None:
             raise _invalid("Podaj treść do sprawdzenia (pole text).")
+        if len(text) > MAX_TEXT_LENGTH:
+            raise _invalid(f"Treść może mieć najwyżej {MAX_TEXT_LENGTH} znaków.")
+    elif text is not None and len(text) > MAX_QUESTION_CHARS:
+        raise _invalid(f"Pytanie do linku lub pliku może mieć najwyżej {MAX_QUESTION_CHARS} znaków.")
     if input_type is InputType.URL:
         if url is None:
             raise _invalid("Podaj link do sprawdzenia (pole url).")
@@ -336,6 +367,24 @@ async def check(
         media = await _read_media(file, input_type)
     elif has_file:
         raise _invalid("Plik jest dozwolony tylko dla type=image lub type=video.")
+
+    # Screen what the user typed before anything else runs. Fails closed: if
+    # the guard cannot run, the request is not processed.
+    if text is not None:
+        try:
+            guard = await asyncio.to_thread(guard_factory)
+            screening = await guard.screen(text)
+        except Exception:
+            logger.exception("Injection guard unavailable; request rejected (fail closed)")
+            return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=TECH_FAILURE_MESSAGE)
+        if screening.blocked:
+            # Scores and shape only: the text itself may hold personal data.
+            logger.warning(
+                "Blocked suspected prompt injection: type=%s channel=%s chars=%d blocked_by=%s scores=%s",
+                input_type.value, channel.value, len(text), ",".join(screening.blocked_by),
+                " ".join(f"{name}={score:.3f}" for name, score in screening.scores.items()),
+            )
+            raise _invalid(INJECTION_BLOCKED_MESSAGE)
 
     try:
         async with pipeline_factory() as pipeline:

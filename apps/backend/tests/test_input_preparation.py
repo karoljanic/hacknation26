@@ -15,7 +15,16 @@ from prawdowid.adapters.sources.web import ArticleFetcher, FetchedArticle
 from prawdowid.domain.claims import ClaimExtraction
 from prawdowid.domain.preparation import MediaFragment, MediaReading
 from prawdowid.services.claims import ClaimExtractor
+<<<<<<< Updated upstream
 from prawdowid.services.preparation import MAX_MEDIA_BYTES, InputPreparer, NoExtractableContentError, extract_article, extract_document
+=======
+from prawdowid.services.preparation import (
+    MAX_MEDIA_BYTES,
+    MAX_TEXT_CHARS,
+    InputPreparer,
+    NoExtractableContentError,
+)
+>>>>>>> Stashed changes
 
 
 def preparer(reading: MediaReading | None = None) -> InputPreparer:
@@ -111,6 +120,13 @@ def test_article_text_limit_is_not_silent_truncation(size: int) -> None:
             service.prepare_url("https://news.example/")
     else:
         assert len(service.prepare_url("https://news.example/").segments[0].text) == size
+
+
+def test_typed_text_over_the_limit_is_rejected_not_cut() -> None:
+    service = preparer()
+    assert service.prepare_text("x" * MAX_TEXT_CHARS).segments[0].text == "x" * MAX_TEXT_CHARS
+    with pytest.raises(ValueError, match=str(MAX_TEXT_CHARS)):
+        service.prepare_text("x" * (MAX_TEXT_CHARS + 1))
 
 
 def test_video_keeps_speech_and_on_screen_text_as_separate_segments() -> None:

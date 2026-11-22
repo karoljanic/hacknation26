@@ -249,6 +249,19 @@ textarea.input {
   min-height: 8rem;
 }
 
+.field__counter {
+  margin: 0;
+  justify-self: end;
+  font-size: 0.875rem;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.field__counter--warn {
+  font-weight: 700;
+  color: var(--color-error-border);
+}
+
 .field__error {
   margin: 0;
   font-weight: 700;
