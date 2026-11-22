@@ -71,6 +71,8 @@ type InjectionAlert = {
 
 type Tab = "topics" | "quality" | "security";
 
+const SESSION_KEY = "prawdowid-admin-session";
+
 const WINDOW_OPTIONS: { label: string; value: string }[] = [
     { label: "Ostatnie 24 h", value: "1" },
     { label: "7 dni", value: "7" },
@@ -150,8 +152,8 @@ export function AdminDashboard() {
     const [topicsPageSize, setTopicsPageSize] = useState<number>(10);
 
     const [loggedIn, setLoggedIn] = useState(false);
-    const [needsAuth, setNeedsAuth] = useState(false);
-    const [loading, setLoading] = useState(true);
+    const [authError, setAuthError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
 
@@ -161,16 +163,51 @@ export function AdminDashboard() {
     const [injections, setInjections] = useState<InjectionAlert[]>([]);
     const [busyId, setBusyId] = useState<string | null>(null);
 
-    const apiFetch = useCallback(
-        async (path: string, init?: RequestInit) => {
-            return fetch(`/api/admin/${path}`, { ...init, cache: "no-store" });
-        },
-        [],
-    );
+    useEffect(() => {
+        try {
+            if (window.sessionStorage.getItem(SESSION_KEY) === "1") {
+                setLoggedIn(true);
+            }
+        } catch {
+            // sessionStorage unavailable
+        }
+    }, []);
+
+    function handleLogin() {
+        try {
+            window.sessionStorage.setItem(SESSION_KEY, "1");
+        } catch {
+            // ignore
+        }
+        setAuthError(null);
+        setError(null);
+        setLoggedIn(true);
+    }
+
+    function handleLogout() {
+        try {
+            window.sessionStorage.removeItem(SESSION_KEY);
+        } catch {
+            // ignore
+        }
+        setLoggedIn(false);
+        setAuthError(null);
+        setError(null);
+        setNotice(null);
+        setOverview(null);
+        setTopicsPage(EMPTY_TOPICS_PAGE);
+        setRuns([]);
+        setInjections([]);
+    }
+
+    const apiFetch = useCallback(async (path: string, init?: RequestInit) => {
+        return fetch(`/api/admin/${path}`, { ...init, cache: "no-store" });
+    }, []);
 
     const loadAll = useCallback(async () => {
         setLoading(true);
         setError(null);
+        setAuthError(null);
         const daysParam = windowVal === "all" ? "" : `days=${windowVal}`;
         const q = (extra: string[] = []) => {
             const parts = [daysParam, ...extra].filter(Boolean);
@@ -193,8 +230,13 @@ export function AdminDashboard() {
             ]);
 
             const responses = [ovRes, topRes, runRes, injRes];
-            if (responses.some((r) => r.status === 401)) {
-                setNeedsAuth(true);
+            const authFailed = responses.find((r) => r.status === 401 || r.status === 503);
+            if (authFailed) {
+                const body = (await authFailed.json().catch(() => ({}))) as { detail?: string };
+                setAuthError(
+                    body.detail ??
+                    "Panel administratora nie jest skonfigurowany na serwerze (sprawdź PRAWDOWID_ADMIN_TOKEN).",
+                );
                 setLoading(false);
                 return;
             }
@@ -205,7 +247,6 @@ export function AdminDashboard() {
                 throw new Error(body.detail ?? `Błąd pobierania danych (HTTP ${failed.status}).`);
             }
 
-            setNeedsAuth(false);
             setOverview((await ovRes.json()) as Overview);
 
             const parsedTopics = (await topRes.json()) as HotTopicsPage;
@@ -283,16 +324,37 @@ export function AdminDashboard() {
 
     if (!loggedIn) {
         return (
-            <button type="button" className="button" onClick={() => setLoggedIn(true)}>
-                Zaloguj do panelu
-            </button>
+            <div className="admin">
+                <button type="button" className="button" onClick={handleLogin}>
+                    Zaloguj się
+                </button>
+            </div>
         );
     }
 
-    if (needsAuth) {
+    if (authError) {
         return (
-            <div className="alert alert--error">
-                <p>Panel administratora nie jest skonfigurowany na serwerze.</p>
+            <div className="admin">
+                <div className="alert alert--error" role="alert">
+                    <p className="alert__title">Brak dostępu do panelu administratora</p>
+                    <p>{authError}</p>
+                </div>
+                <div className="admin-toolbar__actions">
+                    <button type="button" className="button" onClick={() => void loadAll()} disabled={loading}>
+                        Spróbuj ponownie
+                    </button>
+                    <button type="button" className="button button--secondary" onClick={handleLogout}>
+                        Wyloguj
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    if (loading && !overview && !error) {
+        return (
+            <div className="alert alert--info" role="status">
+                <p>Ładowanie panelu administratora…</p>
             </div>
         );
     }
@@ -338,6 +400,9 @@ export function AdminDashboard() {
                     </button>
                     <button type="button" className="button" onClick={() => void loadAll()} disabled={loading}>
                         {loading ? "Odświeżam…" : "Odśwież"}
+                    </button>
+                    <button type="button" className="button button--secondary" onClick={handleLogout}>
+                        Wyloguj
                     </button>
                 </div>
             </div>

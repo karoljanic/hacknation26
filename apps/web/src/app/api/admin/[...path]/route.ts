@@ -1,10 +1,10 @@
 // Server-side proxy to the backend's /admin/* endpoints.
 // Keeps API_URL and PRAWDOWID_ADMIN_TOKEN off the client bundle. The panel
-// itself has no login of its own (demo): the server adds the token, so the
+// itself has no password form (demo): the server adds the token, so the
 // API stays closed to direct requests.
 
-const API_URL = process.env.API_URL ?? "http://localhost:8000";
-const SERVER_ADMIN_TOKEN = process.env.PRAWDOWID_ADMIN_TOKEN ?? "";
+export const dynamic = "force-dynamic";
+
 const TIMEOUT_MS = 30_000;
 const SAFE_SEGMENT = /^[a-zA-Z0-9._-]+$/;
 
@@ -18,14 +18,17 @@ async function forward(request: Request, context: RouteContext): Promise<Respons
         return Response.json({ detail: "Nieprawidłowa ścieżka żądania." }, { status: 400 });
     }
 
+    const apiUrl = (process.env.API_URL ?? "http://localhost:8000").trim();
+    const serverAdminToken = (process.env.PRAWDOWID_ADMIN_TOKEN ?? "").trim();
+
     const incomingUrl = new URL(request.url);
-    const targetUrl = `${API_URL}/admin/${path.join("/")}${incomingUrl.search}`;
+    const targetUrl = `${apiUrl}/admin/${path.join("/")}${incomingUrl.search}`;
 
     const headers: Record<string, string> = {};
     const contentType = request.headers.get("content-type");
     if (contentType) headers["content-type"] = contentType;
 
-    if (SERVER_ADMIN_TOKEN) headers["x-admin-token"] = SERVER_ADMIN_TOKEN;
+    if (serverAdminToken) headers["x-admin-token"] = serverAdminToken;
 
     try {
         const hasBody = request.method !== "GET" && request.method !== "HEAD";
