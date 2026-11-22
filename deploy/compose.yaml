@@ -61,6 +61,8 @@ services:
       INJECTION_GUARDRAILS_THRESHOLD: ${INJECTION_GUARDRAILS_THRESHOLD:-0.81}
       CHECK_TRUST_FORWARDED_FOR: ${CHECK_TRUST_FORWARDED_FOR:-}
       PRAWDOWID_SIGNING_KEY: ${PRAWDOWID_SIGNING_KEY:-}
+      # /admin/* requires this token (empty: the admin panel is disabled).
+      PRAWDOWID_ADMIN_TOKEN: ${PRAWDOWID_ADMIN_TOKEN:-}
       # Answer DMs to @prawdowid every N seconds (empty: off). Each poll uses X API credits.
       X_DM_POLL_SECONDS: ${X_DM_POLL_SECONDS:-}
     command: ["uvicorn", "prawdowid.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

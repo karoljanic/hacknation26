@@ -96,6 +96,14 @@ nie zapisywać kodów OAuth z callbacka. Nie wystawiaj tych endpointów
 publicznie bez dodatkowego uwierzytelnienia. Oczekujące autoryzacje są
 przechowywane w pamięci jednego procesu API; po restarcie zacznij nową.
 
+## Panel administratora
+
+Strona `/admin` (API `/admin/*`): metryki jakości, najczęstsze tematy, dziennik
+przebiegów, wykryte próby prompt injection (także zgłoszenia zablokowane na
+wejściu), usuwanie zgłoszeń, retencja i eksport CSV/JSON. Wymaga tokenu
+`PRAWDOWID_ADMIN_TOKEN` w `.env` (wpisywanego w panelu); bez niego panel jest
+wyłączony, bo pozwala usuwać dane.
+
 ## Limity żądań
 
 `POST /check` wywołuje płatne lub limitowane usługi (modele, API źródeł), więc

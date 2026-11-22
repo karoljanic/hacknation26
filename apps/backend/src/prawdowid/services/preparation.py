@@ -7,6 +7,7 @@ from prawdowid.ai.adapters.media import Media
 from prawdowid.adapters.sources.web import ArticleFetcher, FetchedArticle
 from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.preparation import MediaReading, PreparedInput
+from prawdowid.security.injection import detect_hidden_html_injections
 
 MAX_MEDIA_BYTES = 12_000_000
 # Length limits (characters) for what the user types into the form fields.
@@ -136,6 +137,11 @@ class InputPreparer:
 
     def prepare_url(self, url: str) -> PreparedInput:
         article = self.fetcher.fetch(url)
+        hidden_injections = (
+            []
+            if article.content_type == "application/pdf"
+            else detect_hidden_html_injections(article.body, encoding=article.encoding)
+        )
         title, texts = extract_document(article)
         if sum(len(text) for text in texts) > 60_000:
             raise ValueError("Article text exceeds the 60000 character preparation limit")
@@ -152,6 +158,7 @@ class InputPreparer:
             ],
             title=title,
             fetched_at=article.fetched_at,
+            injection_excerpts=hidden_injections,
         )
 
     def prepare_media(self, media: Media, *, source_name: str) -> PreparedInput:

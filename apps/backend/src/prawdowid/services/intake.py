@@ -33,6 +33,7 @@ from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.preparation import MediaReadout, PreparedInput
 from prawdowid.persistence import claims as claim_repo
 from prawdowid.persistence.models import Claim, Submission, SubmissionClaim, VerificationRun
+from prawdowid.security.injection import dedupe_injection_flags, detect_prompt_injections
 from prawdowid.security.redaction import redact
 from prawdowid.services.claims import ClaimExtractor, is_open_question
 from prawdowid.services.answer_cache import same_claims
@@ -178,6 +179,37 @@ class ClaimIntake:
 
     # -- entry points (one per input type) -------------------------------- #
 
+    def record_blocked(
+        self,
+        text: str,
+        *,
+        channel: Channel,
+        blocked_by: list[str],
+        scores: dict[str, float],
+        message: str,
+        sender_hash: str | None = None,
+    ) -> IntakeResult:
+        """Records input rejected by the injection guard: nothing is checked,
+        but the attempt shows up for the administrator like any other flag."""
+        redacted, _ = redact(text)
+        started = time.monotonic()
+        submission_id, run_id = self._open(channel, redacted, None, sender_hash)
+        # The guard's own flag first: it wins deduplication against a heuristic
+        # match on the same excerpt.
+        flags = [{
+            "where": "input:text",
+            "claim_id": None,
+            "excerpt": redacted[:500],
+            "detected_by": "guard:" + ",".join(blocked_by),
+            "scores": {name: round(score, 3) for name, score in scores.items()},
+        }]
+        flags.extend(detect_prompt_injections(redacted, where="input:text", detected_by="input_heuristic"))
+        return self._close(
+            submission_id, run_id, started, [], RunStatus.OUT_OF_SCOPE, message,
+            error="blocked by the injection guard", redacted_text=redacted,
+            injection_flags=dedupe_injection_flags(flags),
+        )
+
     def submit_text(
         self, text: str, *, channel: Channel, question: bool = False, sender_hash: str | None = None
     ) -> IntakeResult:
@@ -234,9 +266,37 @@ class ClaimIntake:
         submission_id, run_id = self._open(channel, redacted_text, url, sender_hash)
         models: list[dict[str, Any]] = []
         media: MediaReadout | None = None
+        injection_flags: list[dict[str, Any]] = []
+        if redacted_text:
+            injection_flags.extend(
+                detect_prompt_injections(
+                    redacted_text,
+                    where=url or "input:text",
+                    detected_by="input_heuristic",
+                )
+            )
         try:
             prepared = prepare()
             prepared = self._redact_segments(prepared)
+            for hidden_excerpt in prepared.injection_excerpts:
+                injection_flags.append(
+                    {
+                        "where": url or "input:html",
+                        "claim_id": None,
+                        "excerpt": hidden_excerpt[:500],
+                        "detected_by": "hidden_html_heuristic",
+                    }
+                )
+            for segment in prepared.segments:
+                where = segment.source_url or url or f"input:{segment.origin}"
+                injection_flags.extend(
+                    detect_prompt_injections(
+                        segment.text,
+                        where=where,
+                        detected_by="input_heuristic",
+                    )
+                )
+            injection_flags = dedupe_injection_flags(injection_flags)
             media = _media_readout(prepared)
             if prepared.media_embedding is not None:
                 self._remember_media(submission_id, prepared, media, models)
@@ -249,33 +309,47 @@ class ClaimIntake:
                                      prepared.preparation_model_version,
                                      prepared.input_tokens, prepared.output_tokens))
             extraction = self.extractor.extract(prepared.segments)
+            for model_excerpt in extraction.data.injection_excerpts:
+                injection_flags.append(
+                    {
+                        "where": url or f"input:{prepared.segments[0].origin}",
+                        "claim_id": None,
+                        "excerpt": model_excerpt[:500],
+                        "detected_by": "extraction_model",
+                    }
+                )
+            injection_flags = dedupe_injection_flags(injection_flags)
             models.append(_usage("extraction", extraction.requested_model,
                                  extraction.model_version,
                                  extraction.input_tokens, extraction.output_tokens))
             embeddings = self._embed(extraction, models)
         except ContentBlocked as exc:  # a refusal, not an outage: retrying will not help
             return self._close(submission_id, run_id, started, models, RunStatus.OUT_OF_SCOPE,
-                               CONTENT_BLOCKED_MESSAGE, error=str(exc), redacted_text=redacted_text)
+                               CONTENT_BLOCKED_MESSAGE, error=str(exc), redacted_text=redacted_text,
+                               injection_flags=injection_flags)
         except NoExtractableContentError as exc:
             description = redact(exc.media_description)[0] if exc.media_description else None
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
                                exc.user_message or "Nie udało się odczytać treści do sprawdzenia.", error=str(exc),
                                redacted_text=redacted_text,
                                media=MediaReadout(description=description, text="", text_complete=True)
-                               if description else None)
+                               if description else None,
+                               injection_flags=injection_flags)
         except ValidationError as exc:  # malformed model output (subclass of ValueError)
             return self._close(submission_id, run_id, started, models, RunStatus.TECH_FAILURE,
                                "Błąd techniczny podczas analizy. Spróbuj ponownie później.",
                                error=f"invalid model output: {exc.error_count()} errors",
-                               redacted_text=redacted_text)
+                               redacted_text=redacted_text, injection_flags=injection_flags)
         except ValueError as exc:  # rejected input: bad/non-public URL, size limits, ...
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
                                "Nie można przetworzyć tego zgłoszenia. Sprawdź link lub treść.",
-                               error=str(exc), redacted_text=redacted_text)
+                               error=str(exc), redacted_text=redacted_text,
+                               injection_flags=injection_flags)
         except Exception as exc:  # provider outage, rate limit, missing key, timeout, ...
             return self._close(submission_id, run_id, started, models, RunStatus.TECH_FAILURE,
                                "Błąd techniczny podczas analizy. Spróbuj ponownie później.",
-                               error=f"{type(exc).__name__}: {exc}", redacted_text=redacted_text)
+                               error=f"{type(exc).__name__}: {exc}", redacted_text=redacted_text,
+                               injection_flags=injection_flags)
 
         if not extraction.data.claims:
             message = (
@@ -285,11 +359,13 @@ class ClaimIntake:
                 else "Nie znaleziono twierdzeń do sprawdzenia. Opisz, co dokładnie chcesz zweryfikować."
             )
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
-                               message, redacted_text=redacted_text, media=media)
+                               message, redacted_text=redacted_text, media=media,
+                               injection_flags=injection_flags)
 
         stored = self._store_claims(submission_id, extraction, embeddings)
         self._close(submission_id, run_id, started, models, RunStatus.OK, None,
-                    redacted_text=redacted_text, finish=not self.keep_run_open)
+                    redacted_text=redacted_text, finish=not self.keep_run_open,
+                    injection_flags=injection_flags)
         input_text = "\n\n".join(segment.text for segment in prepared.segments)
         source_text = "\n".join(segment.text for segment in prepared.segments if segment.origin == "article")
         return IntakeResult(
@@ -497,10 +573,15 @@ class ClaimIntake:
         redacted_text: str | None = None,
         finish: bool = True,
         media: MediaReadout | None = None,
+        injection_flags: list[dict[str, Any]] | None = None,
     ) -> IntakeResult:
         with self.session_factory() as session, session.begin():
             run = session.get_one(VerificationRun, run_id)
             run.models = models
+            if injection_flags:
+                run.injection_flags = dedupe_injection_flags(
+                    [*(run.injection_flags or []), *injection_flags]
+                )
             if finish:
                 run.status = status
                 run.finished_at = datetime.now(timezone.utc)

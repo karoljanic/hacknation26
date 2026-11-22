@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from prawdowid.api.admin import router as admin_router
 from prawdowid.api.check import router as check_router
 from prawdowid.api.verify import router as verify_router
 from prawdowid.api.x_auth import router as x_auth_router
@@ -79,6 +80,7 @@ app = FastAPI(title="Prawdowid API", version="0.1.0", lifespan=lifespan)
 app.include_router(check_router)
 app.include_router(verify_router)
 app.include_router(x_auth_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

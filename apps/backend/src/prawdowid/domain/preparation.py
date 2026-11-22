@@ -54,3 +54,4 @@ class PreparedInput(BaseModel):
     media_embedding: list[float] | None = None
     media_embedding_model: str | None = None
     reused_reading: bool = False
+    injection_excerpts: list[str] = Field(default_factory=list)

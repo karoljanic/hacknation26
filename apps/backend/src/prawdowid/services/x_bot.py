@@ -165,6 +165,15 @@ class XDmBot:
                 return TECH_MESSAGE
             if screening.blocked:
                 log.warning("Blocked suspected prompt injection in DM %s: %s", event.id, screening.blocked_by)
+                try:
+                    async with self.pipeline_factory() as pipeline:
+                        await asyncio.to_thread(
+                            pipeline.intake.record_blocked, typed, channel=Channel.X,
+                            blocked_by=list(screening.blocked_by), scores=dict(screening.scores),
+                            message=INJECTION_MESSAGE, sender_hash=sender_hash(event.sender_id or ""),
+                        )
+                except Exception:
+                    log.warning("Recording the blocked DM %s failed", event.id, exc_info=True)
                 return INJECTION_MESSAGE
         try:
             self.limits.admit(f"x:{sender_hash(event.sender_id or '')}")

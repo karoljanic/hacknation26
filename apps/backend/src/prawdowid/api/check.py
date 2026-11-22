@@ -205,6 +205,23 @@ def get_pipeline_factory() -> Callable[[], AbstractAsyncContextManager[Verificat
     return build_pipeline
 
 
+async def _record_blocked(
+    pipeline_factory: Callable[[], AbstractAsyncContextManager[VerificationPipeline]],
+    text: str,
+    channel: Channel,
+    screening,
+) -> None:
+    """Best effort: a failure to record must not change the answer to the user."""
+    try:
+        async with pipeline_factory() as pipeline:
+            await asyncio.to_thread(
+                pipeline.intake.record_blocked, text, channel=channel, blocked_by=list(screening.blocked_by),
+                scores=dict(screening.scores), message=INJECTION_BLOCKED_MESSAGE,
+            )
+    except Exception:
+        logger.warning("Recording a blocked injection attempt failed", exc_info=True)
+
+
 def _prepend_question(segments: list[InputSegment], question: str) -> list[InputSegment]:
     return [InputSegment(id="question-1", text=question, origin="question"), *segments]
 
@@ -399,6 +416,7 @@ async def check(
                 input_type.value, channel.value, len(text), ",".join(screening.blocked_by),
                 " ".join(f"{name}={score:.3f}" for name, score in screening.scores.items()),
             )
+            await _record_blocked(pipeline_factory, text, channel, screening)
             raise _invalid(INJECTION_BLOCKED_MESSAGE)
 
     try:
