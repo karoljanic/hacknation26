@@ -35,7 +35,8 @@ from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES, VIDEO_T
 from prawdowid.security.attestation import (
     SignableClaim,
     compute_answer_hash,
-    format_answer_text,
+    compute_claim_hash,
+    format_claim_text,
     get_signing_key,
     normalize_for_hash,
 )
@@ -93,6 +94,14 @@ class ClaimResult(BaseModel):
         default_factory=list,
         description="Gdy brak werdyktu: co trzeba doprecyzować (kto, kiedy, gdzie), żeby dało się to sprawdzić.",
     )
+    answer_hash: str | None = Field(
+        default=None,
+        description="128-bitowy podpis HMAC-SHA256 (32 znaki hex) liczony wyłącznie dla tego stwierdzenia.",
+    )
+    signed_text: str | None = Field(
+        default=None,
+        description="Kanoniczna treść tego stwierdzenia, na podstawie której wyliczono `answer_hash`.",
+    )
 
 
 class CheckResponse(BaseModel):
@@ -108,13 +117,12 @@ class CheckResponse(BaseModel):
     )
     answer_hash: str | None = Field(
         default=None,
-        description="Podpis HMAC-SHA256 odpowiedzi (liczony kluczem prywatnym po normalizacji tekstu).",
+        description="128-bitowy podpis komunikatu (wypełniany tylko gdy `claims` jest puste; gdy są twierdzenia, każde ma własny `answer_hash`).",
     )
     signed_text: str | None = Field(
         default=None,
-        description="Kanoniczna treść odpowiedzi, na podstawie której wyliczono `answer_hash`.",
+        description="Kanoniczna treść komunikatu dla `answer_hash` (gdy `claims` jest puste).",
     )
-
 
 class ErrorResponse(BaseModel):
     detail: str
@@ -177,61 +185,70 @@ def _prepend_question(segments: list[InputSegment], question: str) -> list[Input
 def _to_check_response(result: PipelineResult) -> "CheckResponse":
     if result.status != RunStatus.OK:
         return CheckResponse(run_id=str(result.run_id), status=result.status, message=result.message)
-    claims = [
-        ClaimResult(
-            text=outcome.text,
-            kind=ClaimKind(outcome.kind),
-            verdict=Verdict(outcome.assessment.verdict),
-            strength=Strength(outcome.assessment.strength),
-            explanation=outcome.assessment.explanation,
-            limitations=outcome.assessment.limitations,
-            basis=outcome.assessment.reasons.basis,
-            missing_details=outcome.assessment.missing_details,
-            sources=[
-                Source(
-                    title=outcome.evidence[citation.evidence_index].item.title,
-                    url=outcome.evidence[citation.evidence_index].item.url,
-                    publisher=(
-                        outcome.evidence[citation.evidence_index].item.publisher
-                        or outcome.evidence[citation.evidence_index].item.source
-                    ),
-                    published_at=outcome.evidence[citation.evidence_index].item.published_at,
-                    quote=citation.quote,
-                )
-                for citation in outcome.assessment.citations
-            ],
-        )
-        for outcome in result.claims
-    ]
-    signed_text: str | None = None
-    answer_hash: str | None = None
+
     signing_key = get_signing_key()
-    if signing_key:
-        candidate = format_answer_text(
-            [
-                SignableClaim(
-                    text=c.text,
-                    verdict=c.verdict,
-                    strength=c.strength,
-                    explanation=c.explanation,
-                    limitations=c.limitations,
-                    missing_details=c.missing_details,
-                )
-                for c in claims
-            ],
-            fallback_message=result.message,
+    claims: list[ClaimResult] = []
+    for outcome in result.claims:
+        verdict = Verdict(outcome.assessment.verdict)
+        strength = Strength(outcome.assessment.strength)
+        claim_signed_text: str | None = None
+        claim_hash: str | None = None
+        if signing_key:
+            signable = SignableClaim(
+                text=outcome.text,
+                verdict=verdict,
+                strength=strength,
+                explanation=outcome.assessment.explanation,
+                limitations=outcome.assessment.limitations,
+                missing_details=outcome.assessment.missing_details,
+            )
+            formatted = format_claim_text(signable)
+            if formatted and normalize_for_hash(formatted):
+                claim_signed_text = formatted
+                claim_hash = compute_claim_hash(signable, secret_key=signing_key)
+
+        claims.append(
+            ClaimResult(
+                text=outcome.text,
+                kind=ClaimKind(outcome.kind),
+                verdict=verdict,
+                strength=strength,
+                explanation=outcome.assessment.explanation,
+                limitations=outcome.assessment.limitations,
+                basis=outcome.assessment.reasons.basis,
+                missing_details=outcome.assessment.missing_details,
+                answer_hash=claim_hash,
+                signed_text=claim_signed_text,
+                sources=[
+                    Source(
+                        title=outcome.evidence[citation.evidence_index].item.title,
+                        url=outcome.evidence[citation.evidence_index].item.url,
+                        publisher=(
+                            outcome.evidence[citation.evidence_index].item.publisher
+                            or outcome.evidence[citation.evidence_index].item.source
+                        ),
+                        published_at=outcome.evidence[citation.evidence_index].item.published_at,
+                        quote=citation.quote,
+                    )
+                    for citation in outcome.assessment.citations
+                ],
+            )
         )
-        if candidate and normalize_for_hash(candidate):
-            signed_text = candidate
-            answer_hash = compute_answer_hash(candidate, secret_key=signing_key)
+
+    fallback_signed_text: str | None = None
+    fallback_hash: str | None = None
+    if signing_key and not claims and result.message and normalize_for_hash(result.message):
+        fallback_signed_text = result.message.strip()
+        fallback_hash = compute_answer_hash(fallback_signed_text, secret_key=signing_key)
 
     return CheckResponse(
         run_id=str(result.run_id),
         status=result.status,
+        message=result.message,
         claims=claims,
         skipped_claims=result.skipped_claims,
-        answer_hash=answer_hash,
-        signed_text=signed_text,
+        answer_hash=fallback_hash,
+        signed_text=fallback_signed_text,
     )
 
 
