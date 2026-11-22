@@ -113,6 +113,7 @@ services:
     environment:
       # Used server-side by the web app's /api/check proxy route.
       API_URL: http://api:8000
+      PRAWDOWID_ADMIN_TOKEN: ${PRAWDOWID_ADMIN_TOKEN:-}
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
 

@@ -40,6 +40,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             <p>Odpowiedzi opierają się na wskazanych źródłach. Zawsze możesz zapoznać się z nimi samodzielnie.</p>
             <ul className="footer__links">
               <li>
+                <a href="/admin">Panel administratora</a>
+              </li>
+              <li>
                 <a href="/polityka-prywatnosci">Polityka prywatności</a>
               </li>
               <li>

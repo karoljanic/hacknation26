@@ -27,6 +27,7 @@ from prawdowid.domain.evidence import (
 )
 from prawdowid.domain.preparation import PreparedInput
 from prawdowid.persistence.models import VerificationRun
+from prawdowid.security.injection import dedupe_injection_flags, detect_prompt_injections
 from prawdowid.services.assessment import (
     OPEN_QUESTION_MESSAGE,
     AssessmentGenerator,
@@ -246,6 +247,18 @@ class VerificationPipeline:
         bundle_evidence = {
             claim_evidence.claim_id: evidence for claim_evidence, evidence in zip(with_evidence, selected, strict=True)
         }
+        for claim_id, evidence_list in bundle_evidence.items():
+            for evidence_item in evidence_list:
+                telemetry.injection_flags.extend(
+                    detect_prompt_injections(
+                        evidence_item.text,
+                        where=str(evidence_item.item.url),
+                        claim_id=claim_id,
+                        detected_by="evidence_heuristic",
+                    )
+                )
+        telemetry.injection_flags = dedupe_injection_flags(telemetry.injection_flags)
+
         bundles = [
             ClaimEvidenceBundle(
                 claim_id=claim_evidence.claim_id,
@@ -277,7 +290,9 @@ class VerificationPipeline:
                 usage_entry("assessment", assessed.requested_model, assessed.model_version,
                             assessed.input_tokens, assessed.output_tokens)
             )
-            telemetry.injection_flags.extend(_injection_flags(assessed.data.injection_notes, bundle_evidence))
+            telemetry.injection_flags = dedupe_injection_flags(
+                [*telemetry.injection_flags, *_injection_flags(assessed.data.injection_notes, bundle_evidence)]
+            )
             judged_by = f"model:{assessed.requested_model}"
             unavailable = {ce.claim_id: ce.unavailable_sources for ce in with_evidence}
             for claim_assessment in assessed.data.assessments:
@@ -364,7 +379,9 @@ class VerificationPipeline:
                 run.latency_ms = int((now - run.started_at).total_seconds() * 1000)
             run.models = [*(run.models or []), *metered, *telemetry.models]
             run.est_cost_usd = estimate_cost(run.models, model_prices())
-            run.injection_flags = [*(run.injection_flags or []), *telemetry.injection_flags]
+            run.injection_flags = dedupe_injection_flags(
+                [*(run.injection_flags or []), *telemetry.injection_flags]
+            )
             if result.status != RunStatus.OK:
                 run.error = result.message
 

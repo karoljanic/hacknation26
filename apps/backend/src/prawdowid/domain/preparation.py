@@ -35,3 +35,4 @@ class PreparedInput(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     notes: list[str] = Field(default_factory=list)
+    injection_excerpts: list[str] = Field(default_factory=list)

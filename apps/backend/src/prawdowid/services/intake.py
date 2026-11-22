@@ -29,6 +29,7 @@ from prawdowid.domain.enums import (
 from prawdowid.domain.preparation import PreparedInput
 from prawdowid.persistence import claims as claim_repo
 from prawdowid.persistence.models import Claim, Submission, SubmissionClaim, VerificationRun
+from prawdowid.security.injection import dedupe_injection_flags, detect_prompt_injections
 from prawdowid.security.redaction import redact
 from prawdowid.services.claims import ClaimExtractor, is_open_question
 from prawdowid.services.preparation import InputPreparer, NoExtractableContentError
@@ -169,9 +170,37 @@ class ClaimIntake:
         started = time.monotonic()
         submission_id, run_id = self._open(channel, redacted_text, url, sender_hash)
         models: list[dict[str, Any]] = []
+        injection_flags: list[dict[str, Any]] = []
+        if redacted_text:
+            injection_flags.extend(
+                detect_prompt_injections(
+                    redacted_text,
+                    where=url or "input:text",
+                    detected_by="input_heuristic",
+                )
+            )
         try:
             prepared = prepare()
             prepared = self._redact_segments(prepared)
+            for hidden_excerpt in prepared.injection_excerpts:
+                injection_flags.append(
+                    {
+                        "where": url or "input:html",
+                        "claim_id": None,
+                        "excerpt": hidden_excerpt[:500],
+                        "detected_by": "hidden_html_heuristic",
+                    }
+                )
+            for segment in prepared.segments:
+                where = segment.source_url or url or f"input:{segment.origin}"
+                injection_flags.extend(
+                    detect_prompt_injections(
+                        segment.text,
+                        where=where,
+                        detected_by="input_heuristic",
+                    )
+                )
+            injection_flags = dedupe_injection_flags(injection_flags)
             # Keep the user's own (media-read) text; for URLs store only the
             # link, never a copy of the article.
             if redacted_text is None and url is None:
@@ -181,30 +210,43 @@ class ClaimIntake:
                                      prepared.preparation_model_version,
                                      prepared.input_tokens, prepared.output_tokens))
             extraction = self.extractor.extract(prepared.segments)
+            for model_excerpt in extraction.data.injection_excerpts:
+                injection_flags.append(
+                    {
+                        "where": url or f"input:{prepared.segments[0].origin}",
+                        "claim_id": None,
+                        "excerpt": model_excerpt[:500],
+                        "detected_by": "extraction_model",
+                    }
+                )
+            injection_flags = dedupe_injection_flags(injection_flags)
             models.append(_usage("extraction", extraction.requested_model,
                                  extraction.model_version,
                                  extraction.input_tokens, extraction.output_tokens))
             embeddings = self._embed(extraction, models)
         except ContentBlocked as exc:  # a refusal, not an outage: retrying will not help
             return self._close(submission_id, run_id, started, models, RunStatus.OUT_OF_SCOPE,
-                               CONTENT_BLOCKED_MESSAGE, error=str(exc), redacted_text=redacted_text)
+                               CONTENT_BLOCKED_MESSAGE, error=str(exc), redacted_text=redacted_text,
+                               injection_flags=injection_flags)
         except NoExtractableContentError as exc:
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
                                "Nie udało się odczytać treści do sprawdzenia.", error=str(exc),
-                               redacted_text=redacted_text)
+                               redacted_text=redacted_text, injection_flags=injection_flags)
         except ValidationError as exc:  # malformed model output (subclass of ValueError)
             return self._close(submission_id, run_id, started, models, RunStatus.TECH_FAILURE,
                                "Błąd techniczny podczas analizy. Spróbuj ponownie później.",
                                error=f"invalid model output: {exc.error_count()} errors",
-                               redacted_text=redacted_text)
+                               redacted_text=redacted_text, injection_flags=injection_flags)
         except ValueError as exc:  # rejected input: bad/non-public URL, size limits, ...
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
                                "Nie można przetworzyć tego zgłoszenia. Sprawdź link lub treść.",
-                               error=str(exc), redacted_text=redacted_text)
+                               error=str(exc), redacted_text=redacted_text,
+                               injection_flags=injection_flags)
         except Exception as exc:  # provider outage, rate limit, missing key, timeout, ...
             return self._close(submission_id, run_id, started, models, RunStatus.TECH_FAILURE,
                                "Błąd techniczny podczas analizy. Spróbuj ponownie później.",
-                               error=f"{type(exc).__name__}: {exc}", redacted_text=redacted_text)
+                               error=f"{type(exc).__name__}: {exc}", redacted_text=redacted_text,
+                               injection_flags=injection_flags)
 
         if not extraction.data.claims:
             message = (
@@ -214,11 +256,12 @@ class ClaimIntake:
                 else "Nie znaleziono twierdzeń do sprawdzenia. Opisz, co dokładnie chcesz zweryfikować."
             )
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
-                               message, redacted_text=redacted_text)
+                               message, redacted_text=redacted_text, injection_flags=injection_flags)
 
         stored = self._store_claims(submission_id, extraction, embeddings)
         self._close(submission_id, run_id, started, models, RunStatus.OK, None,
-                    redacted_text=redacted_text, finish=not self.keep_run_open)
+                    redacted_text=redacted_text, finish=not self.keep_run_open,
+                    injection_flags=injection_flags)
         input_text = "\n\n".join(segment.text for segment in prepared.segments)
         source_text = "\n".join(segment.text for segment in prepared.segments if segment.origin == "article")
         return IntakeResult(
@@ -371,10 +414,15 @@ class ClaimIntake:
         error: str | None = None,
         redacted_text: str | None = None,
         finish: bool = True,
+        injection_flags: list[dict[str, Any]] | None = None,
     ) -> IntakeResult:
         with self.session_factory() as session, session.begin():
             run = session.get_one(VerificationRun, run_id)
             run.models = models
+            if injection_flags:
+                run.injection_flags = dedupe_injection_flags(
+                    [*(run.injection_flags or []), *injection_flags]
+                )
             if finish:
                 run.status = status
                 run.finished_at = datetime.now(timezone.utc)
