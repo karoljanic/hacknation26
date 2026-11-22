@@ -9,7 +9,8 @@ type ClaimKind = "factual_claim" | "verification_question" | "opinion";
 type Verdict = "confirmed" | "false" | "misleading" | "insufficient_evidence" | "unverifiable";
 type Strength = "strong" | "moderate" | "weak";
 type RunStatus = "pending" | "running" | "ok" | "tech_failure" | "needs_clarification" | "out_of_scope";
-type VerifyStatus = "verified" | "invalid_hash" | "missing_hash" | "unreadable";
+type ItemVerifyStatus = "verified" | "invalid_hash" | "missing_hash" | "unreadable";
+type OverallVerifyStatus = "verified" | "partial" | "invalid_hash" | "missing_hash" | "unreadable";
 
 type Source = {
   title: string;
@@ -29,6 +30,7 @@ type Claim = {
   basis: "evidence" | "general_knowledge";
   sources: Source[];
   missing_details?: string[];
+  answer_hash?: string | null;
 };
 
 type MediaInfo = {
@@ -47,10 +49,20 @@ type CheckResponse = {
   answer_hash?: string | null;
 };
 
+type VerifiedClaimItem = {
+  claim_text: string;
+  verdict: string | null;
+  authentic: boolean;
+  status: ItemVerifyStatus;
+  message: string;
+  extracted_hash: string | null;
+};
+
 type VerifyResponse = {
   authentic: boolean;
-  status: VerifyStatus;
+  status: OverallVerifyStatus;
   message: string;
+  items?: VerifiedClaimItem[];
   extracted_hash?: string | null;
 };
 
@@ -96,7 +108,7 @@ const OPTIONS: { value: InputType; label: string; hint: string }[] = [
 const VERDICT_LABEL: Record<Verdict, string> = {
   confirmed: "Potwierdzone",
   false: "Fałszywe",
-  misleading: "Częściowo prawdziwe / wprowadzające w błąd",
+  misleading: "Wprowadzające w błąd",
   insufficient_evidence: "Brak wystarczających dowodów",
   unverifiable: "Nie podlega weryfikacji",
 };
@@ -142,8 +154,9 @@ type State =
   | {
     kind: "verified-output";
     authentic: boolean;
-    status: VerifyStatus;
+    status: OverallVerifyStatus;
     message: string;
+    items: VerifiedClaimItem[];
     extractedHash: string | null;
   };
 
@@ -162,6 +175,29 @@ function validateFile(file: File, type: "image" | "video"): string | null {
     return "Plik jest za duży. Maksymalny rozmiar to 12 MB.";
   }
   return null;
+}
+
+// Must match the backend limits in prawdowid/services/preparation.py.
+const MAX_TEXT_CHARS = 2000;
+const MAX_QUESTION_CHARS = 500;
+const MAX_URL_CHARS = 2000;
+
+function charsLeftLabel(left: number): string {
+  if (left === 1) return "Pozostał 1 znak";
+  const lastDigit = left % 10;
+  const lastTwo = left % 100;
+  if (lastDigit >= 2 && lastDigit <= 4 && (lastTwo < 12 || lastTwo > 14)) return `Pozostały ${left} znaki`;
+  return `Pozostało ${left} znaków`;
+}
+
+function CharCounter({ id, length, max }: { id: string; length: number; max: number }) {
+  const left = Math.max(0, max - length);
+  const nearLimit = left <= max * 0.1;
+  return (
+    <p id={id} className={`field__counter${nearLimit ? " field__counter--warn" : ""}`}>
+      {charsLeftLabel(left)} (z {max})
+    </p>
+  );
 }
 
 type Draft = { text: string; url: string; file: File | null };
@@ -189,7 +225,7 @@ export function CheckForm() {
     setDrafts((current) => ({ ...current, [type]: { ...current[type], ...change } }));
   }
 
-  // Pozwala wkleić zrzut ekranu ze schowka w dowolnym miejscu strony.
+  // Pozwala wkleić zrzut ekranu ze schowka (Ctrl+V / Cmd+V) w dowolnym miejscu strony.
   useEffect(() => {
     function handleWindowPaste(event: ClipboardEvent) {
       const items = event.clipboardData?.items;
@@ -288,8 +324,8 @@ export function CheckForm() {
       return;
     }
 
-    // The submitted text, link and file stay in the form after the answer,
-    // so the user can see what was checked and adjust it.
+    setDrafts(emptyDrafts());
+
     switch (payload.status) {
       case "ok":
         setState({
@@ -326,7 +362,8 @@ export function CheckForm() {
     }
 
     try {
-      // Obraz -> automatycznie sprawdzamy, czy zawiera podpis (hash) odpowiedzi Prawdowida.
+      // Obraz -> automatycznie sprawdzamy, czy zawiera co najmniej jeden hash Prawdowida.
+      // Jeśli tak (verified / partial / invalid_hash), pokazujemy wynik weryfikacji każdego kafelka.
       // Jeśli nie (zwykłe zdjęcie), przechodzimy do standardowego /api/check.
       if (type === "image" && file) {
         const verifyBody = new FormData();
@@ -340,12 +377,18 @@ export function CheckForm() {
         const verifyDetail = typeof verifyPayload.detail === "string" ? verifyPayload.detail : null;
 
         if (verifyResponse.ok) {
-          if (verifyPayload.status === "verified" || verifyPayload.status === "invalid_hash") {
+          if (
+            verifyPayload.status === "verified" ||
+            verifyPayload.status === "partial" ||
+            verifyPayload.status === "invalid_hash"
+          ) {
+            setDrafts(emptyDrafts());
             setState({
               kind: "verified-output",
               authentic: Boolean(verifyPayload.authentic),
               status: verifyPayload.status,
               message: verifyPayload.message ?? "Zakończono weryfikację zrzutu ekranu.",
+              items: verifyPayload.items ?? [],
               extractedHash: verifyPayload.extracted_hash ?? null,
             });
             return;
@@ -364,13 +407,14 @@ export function CheckForm() {
     }
   }
 
+  const textMax = type === "text" ? MAX_TEXT_CHARS : MAX_QUESTION_CHARS;
   const textLabel =
     type === "text" ? "Treść lub pytanie do sprawdzenia" : "Pytanie (opcjonalnie)";
   const textHint =
     type === "text"
-      ? "Wklej wiadomość, wpis lub cytat albo zadaj pytanie, na które da się odpowiedzieć „tak” lub „nie”. Nie podawaj danych osobowych."
+      ? "Wklej wiadomość, wpis lub cytat albo zadaj pytanie, na które da się odpowiedzieć „tak” lub „nie”, np. „Czy we Włoszech ostatnio odbywał się strajk generalny?”. Nie podawaj danych osobowych."
       : type === "image"
-        ? "Co dokładnie chcesz sprawdzić? Jeśli wklejasz zrzut ekranu odpowiedzi Prawdowida z hashem, rozpoznamy go automatycznie."
+        ? "Co dokładnie chcesz sprawdzić? Jeśli wklejasz zrzut ekranu odpowiedzi Prawdowida z hashami, zweryfikujemy każdy kafelek osobno."
         : type === "video"
           ? "Co dokładnie chcesz sprawdzić? Na przykład: Czy to nagranie pokazuje tegoroczny protest?"
           : "Co dokładnie chcesz sprawdzić? Na przykład: Czy ten artykuł podaje prawdziwe dane?";
@@ -410,12 +454,14 @@ export function CheckForm() {
               type="url"
               inputMode="url"
               required
+              maxLength={MAX_URL_CHARS}
               value={url}
               onChange={(event) => updateDraft({ url: event.target.value })}
-              aria-describedby={`${ids}-url-hint${linkPlatform ? ` ${ids}-url-social` : ""}`}
+              aria-describedby={`${ids}-url-hint ${ids}-url-count${linkPlatform ? ` ${ids}-url-social` : ""}`}
               aria-invalid={linkPlatform ? true : undefined}
               className="input"
             />
+            <CharCounter id={`${ids}-url-count`} length={url.length} max={MAX_URL_CHARS} />
             {linkPlatform && (
               <div id={`${ids}-url-social`} className="alert alert--warning social-link" role="alert">
                 <p className="alert__title">Wpisu z serwisu {linkPlatform} nie odczytam z linku</p>
@@ -440,7 +486,7 @@ export function CheckForm() {
             </label>
             <p id={`${ids}-file-hint`} className="field__hint">
               {type === "image"
-                ? "JPG, PNG lub WebP, maksymalnie 12 MB. Wybierz plik albo wklej zrzut ekranu ze schowka."
+                ? "JPG, PNG lub WebP, maksymalnie 12 MB. Wybierz plik albo wklej zrzut ekranu ze schowka (Ctrl+V / Cmd+V)."
                 : "MP4, WebM lub MOV, maksymalnie 12 MB."}
             </p>
             {fileError && (
@@ -480,13 +526,14 @@ export function CheckForm() {
           <textarea
             id={`${ids}-text`}
             rows={type === "text" ? 5 : 3}
-            maxLength={5000}
+            maxLength={textMax}
             required={type === "text"}
             value={text}
             onChange={(event) => updateDraft({ text: event.target.value })}
-            aria-describedby={`${ids}-text-hint`}
+            aria-describedby={`${ids}-text-hint ${ids}-text-count`}
             className="input"
           />
+          <CharCounter id={`${ids}-text-count`} length={text.length} max={textMax} />
         </div>
 
         {state.kind === "loading" ? (
@@ -532,7 +579,7 @@ function SearchProgress({ mode }: { mode: LoadingMode }) {
     return (
       <div className="search-progress" role="status">
         <p className="search-progress__single">
-          Analizuję obraz i sprawdzam podpis odpowiedzi Prawdowida…
+          Analizuję obraz i sprawdzam podpisy odpowiedzi Prawdowida…
         </p>
       </div>
     );
@@ -642,19 +689,62 @@ function Result({ state }: { state: State }) {
         </div>
       );
     case "verified-output": {
-      const alertClass = state.authentic ? "alert--success" : "alert--error";
-      const title = state.authentic
-        ? "Odpowiedź autentyczna – wygenerowana przez Prawdowid"
-        : "Odpowiedź nieautentyczna lub zmodyfikowana";
+      const alertClass =
+        state.status === "verified"
+          ? "alert--success"
+          : state.status === "partial"
+            ? "alert--warning"
+            : "alert--error";
+      const title =
+        state.status === "verified"
+          ? "Odpowiedź autentyczna – wygenerowana przez Prawdowid"
+          : state.status === "partial"
+            ? "Częściowo potwierdzona odpowiedź Prawdowida"
+            : "Odpowiedź nieautentyczna lub zmodyfikowana";
 
       return (
-        <div className={`alert ${alertClass} verify-result`}>
-          <p className="alert__title">{title}</p>
-          <p>{state.message}</p>
-          {state.extractedHash && (
-            <p className="verify-result__hash">
-              <strong>Odczytany hash:</strong> <code>{state.extractedHash}</code>
-            </p>
+        <div className="results">
+          <div className={`alert ${alertClass} verify-result`}>
+            <p className="alert__title">{title}</p>
+            <p>{state.message}</p>
+            {state.items.length <= 1 && state.extractedHash && (
+              <p className="verify-result__hash">
+                <strong>Odczytany hash:</strong> <code>{state.extractedHash}</code>
+              </p>
+            )}
+          </div>
+
+          {state.items.length > 1 && (
+            <ul className="verify-items">
+              {state.items.map((item, index) => {
+                const itemMod = item.authentic
+                  ? "verify-item--ok"
+                  : item.status === "missing_hash"
+                    ? "verify-item--warn"
+                    : "verify-item--bad";
+                const badgeLabel = item.authentic
+                  ? "Autentyczne"
+                  : item.status === "missing_hash"
+                    ? "Brak hasha"
+                    : "Nieprawidłowy hash";
+
+                return (
+                  <li key={`${item.claim_text}-${index}`} className={`verify-item ${itemMod}`}>
+                    <div className="verify-item__header">
+                      <span className="verify-item__badge">{badgeLabel}</span>
+                      {item.verdict && <span className="verify-item__verdict">{item.verdict}</span>}
+                    </div>
+                    <p className="verify-item__title">{item.claim_text}</p>
+                    <p className="verify-item__message">{item.message}</p>
+                    {item.extracted_hash && (
+                      <p className="verify-result__hash">
+                        <code>{item.extracted_hash}</code>
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </div>
       );
@@ -683,11 +773,7 @@ function Result({ state }: { state: State }) {
             </div>
           )}
           {state.claims.map((claim, index) => (
-            <ClaimResult
-              key={`${claim.text}-${index}`}
-              claim={claim}
-              answerHash={index === 0 ? state.answerHash : null}
-            />
+            <ClaimResult key={`${claim.text}-${index}`} claim={claim} />
           ))}
           {state.skipped.length > 0 && (
             <details className="skipped-claims">
@@ -724,25 +810,25 @@ function HashBadge({ hash }: { hash: string }) {
           ?
         </button>
         <span id={tooltipId} role="tooltip" className="answer-hash__tooltip">
-          Kryptograficzny podpis odpowiedzi Prawdowida. Prześlij lub wklej zrzut ekranu tej odpowiedzi w polu
-          zdjęcia powyżej, aby potwierdzić, że nie została zmieniona.
+          Kryptograficzny podpis tego stwierdzenia. Prześlij lub wklej zrzut ekranu (np. Ctrl+V) w polu zdjęcia
+          powyżej, aby potwierdzić, że treść kafelka nie została zmieniona.
         </span>
       </span>
     </span>
   );
 }
 
-function ClaimResult({ claim, answerHash }: { claim: Claim; answerHash: string | null }) {
+function ClaimResult({ claim }: { claim: Claim }) {
   return (
     <article className="claim-result">
       <p className="claim-result__kind">{CLAIM_KIND_LABEL[claim.kind]}</p>
       <h3 className="claim-result__text">{claim.text}</h3>
       <div className="claim-result__badges">
         <span className={`verdict ${VERDICT_STYLE[claim.verdict]}`}>{VERDICT_LABEL[claim.verdict]}</span>
-        {answerHash && <HashBadge hash={answerHash} />}
+        {claim.answer_hash && <HashBadge hash={claim.answer_hash} />}
         <span className="strength">{STRENGTH_LABEL[claim.strength]}</span>
         {claim.basis === "general_knowledge" && (
-          <span className="basis-badge">Brak źródeł</span>
+          <span className="basis-badge">Wiedza ogólna – bez źródła</span>
         )}
       </div>
       <p className="claim-result__explanation">{claim.explanation}</p>

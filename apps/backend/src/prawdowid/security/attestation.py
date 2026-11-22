@@ -1,15 +1,14 @@
-"""Bezstanowe podpisywanie i weryfikacja odpowiedzi Prawdowida (HMAC-SHA256, 128 bitów).
+"""Bezstanowe podpisywanie i weryfikacja pojedynczych stwierdzeń Prawdowida (HMAC-SHA256, 128 bitów).
 
-Normalizacja przed obliczeniem skrótu ogranicza wrażliwość na błędy OCR i drobne
-różnice formatowania (kopiowanie tekstu, zrzuty ekranu):
-- przed hashowaniem zawsze usuwane są linie zawierające hash/podpis (u góry, u dołu
-  lub w treści), aby sam hash nigdy nie był częścią wejścia funkcji haszującej,
+Każdy kafelek ze stwierdzeniem ma własny 128-bitowy podpis (32 znaki szesnastkowe)
+liczony wyłącznie na podstawie treści tego jednego kafelka.
+
+Normalizacja przed obliczeniem skrótu ogranicza wrażliwość na błędy OCR ze zrzutów ekranu:
+- usuwane są ewentualne fragmenty z hashem oraz etykiety UI (np. „Ograniczenia:”, „Wiedza ogólna – bez źródła”),
 - polskie znaki diakrytyczne -> łacińskie odpowiedniki (w tym ł -> l),
 - pozostałe znaki ze znakami diakrytycznymi -> odpowiedniki ASCII (NFKD),
 - zamiana na małe litery,
 - każdy ciąg białych znaków lub znaków niealfanumerycznych -> pojedynczy średnik `;`.
-
-Podpis to 128-bitowy prefiks HMAC-SHA256 (32 znaki szesnastkowe).
 """
 
 from __future__ import annotations
@@ -47,8 +46,6 @@ _POLISH_TRANSLATION = str.maketrans(
 )
 _NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
 _HEX_RE = re.compile(rf"^[0-9a-f]{{{HASH_HEX_LENGTH}}}$")
-# Dopasowuje dokładnie 32 znaki szesnastkowe (128 bitów), nawet jeśli są zawinięte
-# w nowej linii albo rozdzielone spacjami/myślnikami — nie „zjada” kolejnego wiersza.
 _HEX_FLEX = rf"(?:[0-9a-fA-F][\s-]*){{{HASH_HEX_LENGTH - 1}}}[0-9a-fA-F]"
 
 _HASH_PREFIX_RE = re.compile(
@@ -68,10 +65,19 @@ _INLINE_HASH_RE = re.compile(
     rf"(?<![0-9a-zA-Z])([0-9a-fA-F]{{{HASH_HEX_LENGTH}}})(?![0-9a-zA-Z])"
 )
 
+# Defensywne czyszczenie etykiet UI, które OCR potrafi dokleić do pól kafelka
+_KIND_LINE_PREFIX_RE = re.compile(r"^\s*(?:twierdzenie|pytanie|opinia)\s*\n+", re.IGNORECASE)
+_LIMITATIONS_PREFIX_RE = re.compile(r"^\s*ograniczenia\s*:\s*", re.IGNORECASE)
+_MISSING_HEADER_RE = re.compile(r"^\s*doprecyzuj,\s*aby\s+to\s+sprawdzi[cć]\s*:?\s*$", re.IGNORECASE)
+_BASIS_BADGE_RE = re.compile(
+    r"\bwiedza\s+og[oó]lna\s*[–—-]\s*bez\s+[zź]r[oó]d[lł]a\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class SignableClaim:
-    """Minimalny zestaw widocznych pól twierdzenia objętych podpisem."""
+    """Minimalny zestaw widocznych pól pojedynczego kafelka objętych podpisem."""
 
     text: str
     verdict: Verdict | str
@@ -88,15 +94,7 @@ def get_signing_key() -> str | None:
 
 
 def normalize_for_hash(text: str) -> str:
-    """Normalizuje tekst przed obliczeniem HMAC-SHA256 (odporność na OCR).
-
-    Reguły:
-    1. Polskie znaki (ą, ć, ę, ł, ń, ó, ś, ź, ż) -> odpowiedniki łacińskie.
-    2. Pozostałe znaki diakrytyczne -> usunięcie akcentów przez NFKD.
-    3. Małe litery.
-    4. Białe znaki oraz dowolne ciągi znaków niealfanumerycznych -> jeden średnik `;`.
-    5. Usunięcie skrajnych średników.
-    """
+    """Normalizuje tekst przed obliczeniem HMAC-SHA256 (odporność na OCR)."""
     translated = text.translate(_POLISH_TRANSLATION)
     decomposed = unicodedata.normalize("NFKD", translated)
     ascii_only = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
@@ -104,13 +102,21 @@ def normalize_for_hash(text: str) -> str:
     return _NON_ALNUM_RE.sub(";", lowered).strip(";")
 
 
+def _clean_badge_str(raw: str) -> str:
+    cleaned = strip_hash_lines(raw)
+    cleaned = _BASIS_BADGE_RE.sub("", cleaned)
+    cleaned = re.sub(r"[\s?()]+$", "", cleaned)
+    return cleaned.strip()
+
+
 def _verdict_label(verdict: Verdict | str) -> str:
     if isinstance(verdict, Verdict):
         return VERDICT_LABEL[verdict]
+    cleaned = _clean_badge_str(verdict)
     try:
-        return VERDICT_LABEL[Verdict(verdict.strip().lower())]
+        return VERDICT_LABEL[Verdict(cleaned.lower())]
     except ValueError:
-        return verdict.strip()
+        return cleaned
 
 
 def _strength_label(strength: Strength | str | None) -> str | None:
@@ -118,7 +124,7 @@ def _strength_label(strength: Strength | str | None) -> str | None:
         return None
     if isinstance(strength, Strength):
         return STRENGTH_LABEL[strength]
-    cleaned = strength.strip()
+    cleaned = _clean_badge_str(strength)
     if not cleaned:
         return None
     try:
@@ -127,33 +133,45 @@ def _strength_label(strength: Strength | str | None) -> str | None:
         return cleaned
 
 
+def format_claim_text(claim: SignableClaim) -> str:
+    """Buduje deterministyczną treść pojedynczego kafelka ze stwierdzeniem (bez hasha)."""
+    lines: list[str] = []
+
+    claim_text = _KIND_LINE_PREFIX_RE.sub("", strip_hash_lines(claim.text)).strip()
+    if claim_text:
+        lines.append(claim_text)
+
+    v_label = _verdict_label(claim.verdict)
+    s_label = _strength_label(claim.strength)
+    if v_label and s_label:
+        lines.append(f"{v_label} ({s_label})")
+    elif v_label:
+        lines.append(v_label)
+
+    explanation = strip_hash_lines(claim.explanation).strip()
+    if explanation:
+        lines.append(explanation)
+
+    for detail in claim.missing_details:
+        cleaned_detail = strip_hash_lines(detail).strip()
+        if cleaned_detail and not _MISSING_HEADER_RE.match(cleaned_detail):
+            lines.append(cleaned_detail)
+
+    if claim.limitations:
+        cleaned_lim = _LIMITATIONS_PREFIX_RE.sub("", strip_hash_lines(claim.limitations)).strip()
+        if cleaned_lim:
+            lines.append(cleaned_lim)
+
+    return "\n".join(lines)
+
+
 def format_answer_text(
     claims: Sequence[SignableClaim],
     *,
     fallback_message: str | None = None,
 ) -> str:
-    """Buduje deterministyczną, czytelną treść odpowiedzi (bez linii z hashem)."""
-    blocks: list[str] = []
-    for claim in claims:
-        lines: list[str] = []
-        if claim.text.strip():
-            lines.append(claim.text.strip())
-        v_label = _verdict_label(claim.verdict)
-        s_label = _strength_label(claim.strength)
-        if v_label and s_label:
-            lines.append(f"{v_label} ({s_label})")
-        elif v_label:
-            lines.append(v_label)
-        if claim.explanation.strip():
-            lines.append(claim.explanation.strip())
-        for detail in claim.missing_details:
-            if detail and detail.strip():
-                lines.append(detail.strip())
-        if claim.limitations and claim.limitations.strip():
-            lines.append(claim.limitations.strip())
-        if lines:
-            blocks.append("\n".join(lines))
-
+    """Buduje tekst odpowiedzi (pomocniczo m.in. dla komunikatu bez twierdzeń)."""
+    blocks = [block for claim in claims if (block := format_claim_text(claim))]
     if blocks:
         return "\n\n".join(blocks)
     if fallback_message and fallback_message.strip():
@@ -162,20 +180,17 @@ def format_answer_text(
 
 
 def clean_hash(value: str | None) -> str | None:
-    """Czyści hash z prefiksów, białych znaków i myślników; zwraca 32-znakowy hex (128 bitów) lub ``None``."""
+    """Czyści hash z prefiksów, ikonki `?`, białych znaków i myślników; zwraca 32 znaki hex lub ``None``."""
     if not value:
         return None
     stripped = _HASH_PREFIX_RE.sub("", value.strip())
+    stripped = re.sub(r"[\s?()]+$", "", stripped)
     compact = re.sub(r"[\s-]+", "", stripped).lower()
     return compact if _HEX_RE.fullmatch(compact) else None
 
 
 def extract_hash_and_body(raw_text: str) -> tuple[str, str | None]:
-    """Rozdziela wklejoną odpowiedź na treść właściwą (bez hasha) i wyodrębniony hash.
-
-    Obsługuje hash z etykietą (`Hash: ...`), w osobnej linii oraz inline obok
-    etykiety werdyktu (np. „Potwierdzone <hash> Silna podstawa”).
-    """
+    """Oddziela ewentualny 32-znakowy hash z tekstu OCR od treści właściwej."""
     text = raw_text.strip()
     if not text:
         return "", None
@@ -203,13 +218,13 @@ def extract_hash_and_body(raw_text: str) -> tuple[str, str | None]:
 
 
 def strip_hash_lines(text: str) -> str:
-    """Usuwa z tekstu wszelkie linie z hashem weryfikacyjnym, aby nie trafiły do funkcji haszującej."""
+    """Usuwa z tekstu ewentualny hash weryfikacyjny, aby nigdy nie trafił do funkcji haszującej."""
     body, _ = extract_hash_and_body(text)
     return body
 
 
 def compute_answer_hash(text: str, *, secret_key: str) -> str:
-    """Liczy 128-bitowy podpis (32 znaki hex) z HMAC-SHA256 klucza prywatnego i znormalizowanej treści (bez hasha)."""
+    """Liczy 128-bitowy podpis (32 znaki hex) z HMAC-SHA256 klucza prywatnego i znormalizowanej treści."""
     if not secret_key or not secret_key.strip():
         raise ValueError("Klucz podpisujący (PRAWDOWID_SIGNING_KEY) nie może być pusty.")
     body_without_hash = strip_hash_lines(text)
@@ -224,8 +239,13 @@ def compute_answer_hash(text: str, *, secret_key: str) -> str:
     return digest[:HASH_HEX_LENGTH]
 
 
+def compute_claim_hash(claim: SignableClaim, *, secret_key: str) -> str:
+    """Liczy 128-bitowy podpis wyłącznie dla jednego kafelka ze stwierdzeniem."""
+    return compute_answer_hash(format_claim_text(claim), secret_key=secret_key)
+
+
 def verify_answer_hash(text: str, provided_hash: str, *, secret_key: str) -> bool:
-    """Sprawdza w stałym czasie, czy 128-bitowy hash odpowiada znormalizowanej treści (bez linii hasha)."""
+    """Sprawdza w stałym czasie, czy 128-bitowy hash odpowiada znormalizowanej treści (bez hasha)."""
     cleaned = clean_hash(provided_hash)
     if cleaned is None:
         return False
@@ -235,3 +255,8 @@ def verify_answer_hash(text: str, provided_hash: str, *, secret_key: str) -> boo
         return False
     expected = compute_answer_hash(body_without_hash, secret_key=secret_key)
     return hmac.compare_digest(expected, cleaned)
+
+
+def verify_claim_hash(claim: SignableClaim, provided_hash: str, *, secret_key: str) -> bool:
+    """Sprawdza w stałym czasie podpis pojedynczego kafelka ze stwierdzeniem."""
+    return verify_answer_hash(format_claim_text(claim), provided_hash, secret_key=secret_key)

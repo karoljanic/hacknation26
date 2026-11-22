@@ -1,8 +1,8 @@
 """POST /verify: sprawdza autentyczność odpowiedzi Prawdowida na podstawie zrzutu ekranu.
 
-Wariant bezstanowy (A), 128-bitowy podpis HMAC-SHA256 (32 znaki hex):
-przyjmuje wyłącznie obraz (`file`), odczytuje treść i 32-znakowy hash przez Gemini Vision,
-a następnie deterministycznie weryfikuje podpis kluczem prywatnym.
+Wariant bezstanowy (A), 128-bitowy podpis HMAC-SHA256 (32 znaki hex) osobny dla każdego
+kafelka ze stwierdzeniem. Jeśli na zrzucie znajduje się więcej niż jeden kafelek z hashem,
+każdy jest weryfikowany niezależnie i raportowany na liście `items`.
 """
 
 from __future__ import annotations
@@ -25,7 +25,12 @@ from prawdowid.api.check import ErrorResponse, InputType, _read_media
 from prawdowid.api.dependencies import PREPARATION_MODEL, THINKING_LEVEL
 from prawdowid.api.rate_limit import admit_check
 from prawdowid.security.attestation import HASH_HEX_LENGTH, SIGNING_KEY_ENV, get_signing_key
-from prawdowid.services.attestation import AnswerVerifier, VerificationResult, VerificationStatus
+from prawdowid.services.attestation import (
+    AnswerVerifier,
+    ItemVerificationStatus,
+    OverallVerificationStatus,
+    VerificationResult,
+)
 from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES
 
 router = APIRouter(tags=["verify"], dependencies=[Depends(admit_check)])
@@ -36,19 +41,43 @@ class VerifierUnavailable(RuntimeError):
     """Brak konfiguracji wymaganej do weryfikacji (PRAWDOWID_SIGNING_KEY lub GEMINI_API_KEY)."""
 
 
-class VerifyResponse(BaseModel):
-    authentic: bool = Field(description="True tylko wtedy, gdy 128-bitowy podpis HMAC-SHA256 zgadza się z treścią.")
-    status: VerificationStatus = Field(
+class VerifiedClaimItem(BaseModel):
+    claim_text: str = Field(description="Treść stwierdzenia odczytana z kafelka.")
+    verdict: str | None = Field(default=None, description="Etykieta werdyktu odczytana z kafelka.")
+    authentic: bool = Field(description="True tylko wtedy, gdy 128-bitowy hash tego kafelka zgadza się z jego treścią.")
+    status: ItemVerificationStatus = Field(
         description="`verified` | `invalid_hash` | `missing_hash` | `unreadable`."
     )
-    message: str = Field(description="Czytelny komunikat dla użytkownika.")
+    message: str = Field(description="Komunikat weryfikacji dla tego kafelka.")
     extracted_hash: str | None = Field(
         default=None,
-        description=f"{HASH_HEX_LENGTH}-znakowy (128-bitowy) hash odczytany ze zrzutu ekranu.",
+        description=f"{HASH_HEX_LENGTH}-znakowy (128-bitowy) hash odczytany z tego kafelka.",
     )
     normalized_text: str | None = Field(
         default=None,
-        description="Znormalizowana postać treści (znaki łacińskie + średniki), dla której liczono skrót.",
+        description="Znormalizowana treść tego kafelka, dla której liczono skrót.",
+    )
+
+
+class VerifyResponse(BaseModel):
+    authentic: bool = Field(
+        description="True tylko wtedy, gdy wszystkie odczytane kafelki przeszły weryfikację podpisu."
+    )
+    status: OverallVerificationStatus = Field(
+        description="`verified` | `partial` | `invalid_hash` | `missing_hash` | `unreadable`."
+    )
+    message: str = Field(description="Zbiorczy komunikat dla użytkownika.")
+    items: list[VerifiedClaimItem] = Field(
+        default_factory=list,
+        description="Wyniki niezależnej weryfikacji każdego kafelka wykrytego na zrzucie ekranu.",
+    )
+    extracted_hash: str | None = Field(
+        default=None,
+        description=f"{HASH_HEX_LENGTH}-znakowy hash (wypełniany dla pojedynczego kafelka/komunikatu).",
+    )
+    normalized_text: str | None = Field(
+        default=None,
+        description="Znormalizowana treść (wypełniana dla pojedynczego kafelka/komunikatu).",
     )
 
 
@@ -57,7 +86,7 @@ async def build_verifier() -> AsyncIterator[AnswerVerifier]:
     signing_key = get_signing_key()
     if not signing_key:
         raise VerifierUnavailable(
-            f"Weryfikacja podpisu nie jest skonfigurowana. Brakuje zmiennej {SIGNING_KEY_ENV}."
+            f"Weryfikacja podpisu nie jest skonfigurowana (brak zmiennej {SIGNING_KEY_ENV})."
         )
 
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -84,6 +113,18 @@ def _to_verify_response(result: VerificationResult) -> VerifyResponse:
         authentic=result.authentic,
         status=result.status,
         message=result.message,
+        items=[
+            VerifiedClaimItem(
+                claim_text=item.claim_text,
+                verdict=item.verdict,
+                authentic=item.authentic,
+                status=item.status,
+                message=item.message,
+                extracted_hash=item.extracted_hash,
+                normalized_text=item.normalized_text,
+            )
+            for item in result.items
+        ],
         extracted_hash=result.extracted_hash,
         normalized_text=result.normalized_text,
     )
@@ -94,9 +135,9 @@ def _to_verify_response(result: VerificationResult) -> VerifyResponse:
     response_model=VerifyResponse,
     summary="Zweryfikuj zrzut ekranu odpowiedzi Prawdowida",
     description=(
-        f"Sprawdza, czy zrzut ekranu (`file`: {', '.join(sorted(IMAGE_TYPES))}, do "
-        f"{MAX_MEDIA_BYTES // 1_000_000} MB) przedstawia autentyczną, niezmodyfikowaną odpowiedź "
-        f"wygenerowaną przez Prawdowid (weryfikacja {HASH_HEX_LENGTH}-znakowego / 128-bitowego hasha)."
+        f"Sprawdza zrzut ekranu (`file`: {', '.join(sorted(IMAGE_TYPES))}, do "
+        f"{MAX_MEDIA_BYTES // 1_000_000} MB) z jednym lub wieloma kafelkami odpowiedzi Prawdowida. "
+        f"Każdy kafelek z własnym {HASH_HEX_LENGTH}-znakowym (128-bitowym) hashem jest weryfikowany osobno."
     ),
     responses={
         status.HTTP_413_CONTENT_TOO_LARGE: {"model": ErrorResponse, "description": "Plik jest za duży."},
@@ -118,7 +159,7 @@ async def verify(
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Dołącz zrzut ekranu odpowiedzi Prawdowida.",
+            detail="Dołącz zrzut ekranu odpowiedzi Prawdowida (pole `file`).",
         )
 
     media_bytes = await _read_media(file, InputType.IMAGE)

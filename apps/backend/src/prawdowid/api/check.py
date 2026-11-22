@@ -5,6 +5,11 @@ sent as multipart/form-data so files can be uploaded. The request and response
 schemas are the contract for the web app and the other channels; they appear
 in the OpenAPI docs at /docs.
 
+Before anything runs, every user-typed text field is screened for prompt
+injection and jailbreaks by JEV and the Guardrails ``DetectJailbreak``
+validator (``security.injection_guard``); a flagged field is rejected with 422
+and no run is opened.
+
 Pipeline: ``ClaimIntake`` (redaction, extraction, dedup, storage) is followed
 by ``EvidenceSearchOrchestrator`` (Google Fact Check + EUvsDisinfo, always in
 parallel), ``SublinkSelector`` (a decision call picks which results to fetch
@@ -14,6 +19,7 @@ returned as ``status=tech_failure`` with no claims, never as a fabricated
 merit result.
 """
 
+import asyncio
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime
@@ -31,22 +37,36 @@ from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.enums import Channel, ClaimKind, RunStatus, Strength, Verdict
 from prawdowid.domain.preparation import PreparedInput
 from prawdowid.services.pipeline import PipelineResult, VerificationPipeline
+from prawdowid.services.preparation import (
+    IMAGE_TYPES,
+    MAX_MEDIA_BYTES,
+    MAX_QUESTION_CHARS,
+    MAX_TEXT_CHARS,
+    MAX_URL_CHARS,
+    VIDEO_TYPES,
+    NoExtractableContentError,
+)
 from prawdowid.services.social import social_link_message, social_platform
-from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES, VIDEO_TYPES, NoExtractableContentError
 from prawdowid.security.attestation import (
     SignableClaim,
     compute_answer_hash,
-    format_answer_text,
+    compute_claim_hash,
+    format_claim_text,
     get_signing_key,
     normalize_for_hash,
 )
+from prawdowid.security.injection_guard import InjectionGuard, get_injection_guard_factory
 
 router = APIRouter(tags=["check"], dependencies=[Depends(admit_check)])
 logger = logging.getLogger(__name__)
 
-MAX_TEXT_LENGTH = 5000
+MAX_TEXT_LENGTH = MAX_TEXT_CHARS
 TECH_FAILURE_MESSAGE = "Błąd techniczny podczas sprawdzania. Spróbuj ponownie później."
 INVALID_INPUT_MESSAGE = "Nie udało się odczytać treści do sprawdzenia."
+INJECTION_BLOCKED_MESSAGE = (
+    "Zgłoszenie wygląda na próbę zmiany działania systemu, a nie na treść do sprawdzenia. "
+    "Wpisz po prostu informację lub pytanie, które chcesz zweryfikować."
+)
 
 _HTTP_URL = TypeAdapter(HttpUrl)
 
@@ -94,6 +114,14 @@ class ClaimResult(BaseModel):
         default_factory=list,
         description="Gdy brak werdyktu: co trzeba doprecyzować (kto, kiedy, gdzie), żeby dało się to sprawdzić.",
     )
+    answer_hash: str | None = Field(
+        default=None,
+        description="128-bitowy podpis HMAC-SHA256 (32 znaki hex) liczony wyłącznie dla tego stwierdzenia.",
+    )
+    signed_text: str | None = Field(
+        default=None,
+        description="Kanoniczna treść tego stwierdzenia, na podstawie której wyliczono `answer_hash`.",
+    )
 
 
 class MediaInfo(BaseModel):
@@ -116,13 +144,12 @@ class CheckResponse(BaseModel):
     )
     answer_hash: str | None = Field(
         default=None,
-        description="Podpis HMAC-SHA256 odpowiedzi (liczony kluczem prywatnym po normalizacji tekstu).",
+        description="128-bitowy podpis komunikatu (wypełniany tylko gdy `claims` jest puste; gdy są twierdzenia, każde ma własny `answer_hash`).",
     )
     signed_text: str | None = Field(
         default=None,
-        description="Kanoniczna treść odpowiedzi, na podstawie której wyliczono `answer_hash`.",
+        description="Kanoniczna treść komunikatu dla `answer_hash` (gdy `claims` jest puste).",
     )
-
 
 class ErrorResponse(BaseModel):
     detail: str
@@ -186,62 +213,71 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
     media = MediaInfo(**result.media.model_dump()) if result.media is not None else None
     if result.status != RunStatus.OK:
         return CheckResponse(run_id=str(result.run_id), status=result.status, message=result.message, media=media)
-    claims = [
-        ClaimResult(
-            text=outcome.text,
-            kind=ClaimKind(outcome.kind),
-            verdict=Verdict(outcome.assessment.verdict),
-            strength=Strength(outcome.assessment.strength),
-            explanation=outcome.assessment.explanation,
-            limitations=outcome.assessment.limitations,
-            basis=outcome.assessment.reasons.basis,
-            missing_details=outcome.assessment.missing_details,
-            sources=[
-                Source(
-                    title=outcome.evidence[citation.evidence_index].item.title,
-                    url=outcome.evidence[citation.evidence_index].item.url,
-                    publisher=(
-                        outcome.evidence[citation.evidence_index].item.publisher
-                        or outcome.evidence[citation.evidence_index].item.source
-                    ),
-                    published_at=outcome.evidence[citation.evidence_index].item.published_at,
-                    quote=citation.quote,
-                )
-                for citation in outcome.assessment.citations
-            ],
-        )
-        for outcome in result.claims
-    ]
-    signed_text: str | None = None
-    answer_hash: str | None = None
+
     signing_key = get_signing_key()
-    if signing_key:
-        candidate = format_answer_text(
-            [
-                SignableClaim(
-                    text=c.text,
-                    verdict=c.verdict,
-                    strength=c.strength,
-                    explanation=c.explanation,
-                    limitations=c.limitations,
-                    missing_details=c.missing_details,
-                )
-                for c in claims
-            ],
-            fallback_message=result.message,
+    claims: list[ClaimResult] = []
+    for outcome in result.claims:
+        verdict = Verdict(outcome.assessment.verdict)
+        strength = Strength(outcome.assessment.strength)
+        claim_signed_text: str | None = None
+        claim_hash: str | None = None
+        if signing_key:
+            signable = SignableClaim(
+                text=outcome.text,
+                verdict=verdict,
+                strength=strength,
+                explanation=outcome.assessment.explanation,
+                limitations=outcome.assessment.limitations,
+                missing_details=outcome.assessment.missing_details,
+            )
+            formatted = format_claim_text(signable)
+            if formatted and normalize_for_hash(formatted):
+                claim_signed_text = formatted
+                claim_hash = compute_claim_hash(signable, secret_key=signing_key)
+
+        claims.append(
+            ClaimResult(
+                text=outcome.text,
+                kind=ClaimKind(outcome.kind),
+                verdict=verdict,
+                strength=strength,
+                explanation=outcome.assessment.explanation,
+                limitations=outcome.assessment.limitations,
+                basis=outcome.assessment.reasons.basis,
+                missing_details=outcome.assessment.missing_details,
+                answer_hash=claim_hash,
+                signed_text=claim_signed_text,
+                sources=[
+                    Source(
+                        title=outcome.evidence[citation.evidence_index].item.title,
+                        url=outcome.evidence[citation.evidence_index].item.url,
+                        publisher=(
+                            outcome.evidence[citation.evidence_index].item.publisher
+                            or outcome.evidence[citation.evidence_index].item.source
+                        ),
+                        published_at=outcome.evidence[citation.evidence_index].item.published_at,
+                        quote=citation.quote,
+                    )
+                    for citation in outcome.assessment.citations
+                ],
+            )
         )
-        if candidate and normalize_for_hash(candidate):
-            signed_text = candidate
-            answer_hash = compute_answer_hash(candidate, secret_key=signing_key)
+
+    fallback_signed_text: str | None = None
+    fallback_hash: str | None = None
+    if signing_key and not claims and result.message and normalize_for_hash(result.message):
+        fallback_signed_text = result.message.strip()
+        fallback_hash = compute_answer_hash(fallback_signed_text, secret_key=signing_key)
 
     return CheckResponse(
         run_id=str(result.run_id),
         status=result.status,
+        message=result.message,
         claims=claims,
         media=media,
         skipped_claims=result.skipped_claims,
-        answer_hash=answer_hash,
-        signed_text=signed_text,
+        answer_hash=fallback_hash,
+        signed_text=fallback_signed_text,
     )
 
 
@@ -261,7 +297,8 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
         "| `url` | `url` – link | `text` – pytanie do linku |\n"
         f"| `image` | `file` – {', '.join(sorted(IMAGE_TYPES))} | `text` – pytanie do obrazu |\n"
         f"| `video` | `file` – {', '.join(sorted(VIDEO_TYPES))} | `text` – pytanie do nagrania |\n\n"
-        f"Pliki do {MAX_MEDIA_BYTES // 1_000_000} MB, tekst do {MAX_TEXT_LENGTH} znaków.\n\n"
+        f"Pliki do {MAX_MEDIA_BYTES // 1_000_000} MB, tekst do {MAX_TEXT_LENGTH} znaków, "
+        f"pytanie do linku lub pliku do {MAX_QUESTION_CHARS} znaków, link do {MAX_URL_CHARS} znaków.\n\n"
         "Brak klucza API, limit dostawcy lub awaria sieci dają `status=tech_failure`, "
         "nigdy spreparowany werdykt. Walidacja (`413`, `415`, `422`) działa niezależnie. "
         "Liczba zgłoszeń jest ograniczona (`429`/`503` z `Retry-After`)."
@@ -287,18 +324,23 @@ async def check(
     pipeline_factory: Annotated[
         Callable[[], AbstractAsyncContextManager[VerificationPipeline]], Depends(get_pipeline_factory)
     ],
+    guard_factory: Annotated[Callable[[], InjectionGuard], Depends(get_injection_guard_factory)],
     input_type: Annotated[InputType, Form(alias="type", description="Rodzaj zgłoszenia.")],
     text: Annotated[
         str | None,
+        # No Form(max_length): multipart sends line breaks as CRLF, so the raw
+        # value is longer than what the user typed. Checked below after
+        # normalising line endings.
         Form(
-            max_length=MAX_TEXT_LENGTH,
-            description="Treść, pytanie albo pytanie do linku/pliku.",
+            description=f"Treść, pytanie albo pytanie do linku/pliku (do {MAX_TEXT_LENGTH} znaków; "
+            f"pytanie do linku/pliku do {MAX_QUESTION_CHARS} znaków).",
             examples=["Czy we Włoszech ostatnio odbywał się strajk generalny?"],
         ),
     ] = None,
     url: Annotated[
         str | None,
         Form(
+            max_length=MAX_URL_CHARS,
             description="Link (dla `type=url`; przy innych typach ignorowany).",
             examples=["https://example.org/artykul"],
         ),
@@ -306,6 +348,8 @@ async def check(
     file: Annotated[UploadFile | None, File(description="Obraz lub nagranie (dla `type=image`/`video`).")] = None,
     channel: Annotated[Channel, Form(description="Kanał, z którego przyszło zgłoszenie.")] = Channel.WEB,
 ) -> CheckResponse:
+    # Count characters the way the form shows them: one per line break.
+    text = text.replace("\r\n", "\n").replace("\r", "\n") if text else text
     text = text.strip() if text and text.strip() else None
     url = url.strip() if url and url.strip() else None
     has_file = file is not None and bool(file.filename)
@@ -313,6 +357,10 @@ async def check(
     if input_type in (InputType.TEXT, InputType.QUESTION):
         if text is None:
             raise _invalid("Podaj treść do sprawdzenia (pole text).")
+        if len(text) > MAX_TEXT_LENGTH:
+            raise _invalid(f"Treść może mieć najwyżej {MAX_TEXT_LENGTH} znaków.")
+    elif text is not None and len(text) > MAX_QUESTION_CHARS:
+        raise _invalid(f"Pytanie do linku lub pliku może mieć najwyżej {MAX_QUESTION_CHARS} znaków.")
     if input_type is InputType.URL:
         if url is None:
             raise _invalid("Podaj link do sprawdzenia (pole url).")
@@ -334,6 +382,24 @@ async def check(
         media = await _read_media(file, input_type)
     elif has_file:
         raise _invalid("Plik jest dozwolony tylko dla type=image lub type=video.")
+
+    # Screen what the user typed before anything else runs. Fails closed: if
+    # the guard cannot run, the request is not processed.
+    if text is not None:
+        try:
+            guard = await asyncio.to_thread(guard_factory)
+            screening = await guard.screen(text)
+        except Exception:
+            logger.exception("Injection guard unavailable; request rejected (fail closed)")
+            return CheckResponse(run_id="", status=RunStatus.TECH_FAILURE, message=TECH_FAILURE_MESSAGE)
+        if screening.blocked:
+            # Scores and shape only: the text itself may hold personal data.
+            logger.warning(
+                "Blocked suspected prompt injection: type=%s channel=%s chars=%d blocked_by=%s scores=%s",
+                input_type.value, channel.value, len(text), ",".join(screening.blocked_by),
+                " ".join(f"{name}={score:.3f}" for name, score in screening.scores.items()),
+            )
+            raise _invalid(INJECTION_BLOCKED_MESSAGE)
 
     try:
         async with pipeline_factory() as pipeline:

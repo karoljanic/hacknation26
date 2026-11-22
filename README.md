@@ -107,6 +107,57 @@ wpis); bez tego wszyscy użytkownicy interfejsu WWW dzielą jeden limit klienta.
 Nie włączaj tej zmiennej, gdy API lub strona są dostępne bezpośrednio —
 nagłówek może wtedy podszyć dowolny klient.
 
+## Ochrona przed prompt injection
+
+Każde pole tekstowe wpisane przez użytkownika (treść, pytanie oraz pytanie do
+linku lub pliku) jest sprawdzane pod kątem prompt injection i jailbreaków,
+zanim cokolwiek zostanie uruchomione
+(`apps/backend/src/prawdowid/security/injection_guard.py`). Dwa detektory
+działają równolegle, a zgłoszenie jest odrzucane (`422`, komunikat po polsku),
+gdy którykolwiek osiągnie swój próg. Nie powstaje wtedy przebieg i nie są
+wywoływane modele ani źródła. W logu zapisywane są wyniki i typ zgłoszenia,
+nigdy sam tekst.
+
+| Detektor | Jak działa | Próg | Zmienna |
+| --- | --- | --- | --- |
+| JEV (TypeSafe) | jedno stałe pytanie tak/nie; tekst użytkownika trafia wyłącznie do danych (`state`), nigdy do instrukcji | 0.5 | `INJECTION_JEV_THRESHOLD` |
+| Guardrails `DetectJailbreak` | lokalnie na CPU: podobieństwo do znanych jailbreaków, wykrywanie „prompt saturation”, klasyfikator RoBERTa | 0.81 | `INJECTION_GUARDRAILS_THRESHOLD` |
+
+- Wynik testu na 24 polskich i angielskich przykładach oraz prawdziwym
+  jailbreaku z odgrywaniem ról: JEV dawał zwykłym zgłoszeniom ≤ 0,05, atakom
+  ≥ 0,84. Guardrails przy 0,81 nie blokował żadnego zwykłego zgłoszenia i
+  łapał klasyczne angielskie jailbreaki (DAN, odgrywanie ról), ale polskie
+  ataki ocenia tak samo jak zwykły tekst — po polsku chroni JEV.
+- JEV działa, gdy ustawiony jest `TYPESAFE_API_KEY` (bez klucza działa tylko
+  Guardrails, z ostrzeżeniem w logu). Dodaje ok. 0,2 s i jedno wywołanie
+  TypeSafe na pole.
+- Fail closed: gdy detektora nie da się załadować albo wywołanie się nie uda,
+  `/check` zwraca `tech_failure` i nie przetwarza zgłoszenia.
+- Guardrails: telemetria i zdalne wnioskowanie są wyłączone w kodzie, a modele
+  ładują się offline (`HF_HUB_OFFLINE=1`), więc tekst nie opuszcza serwera
+  tą drogą. Obraz instaluje PyTorch w wersji CPU.
+- To jedna warstwa, nie gwarancja: treści pobierane z linków, odczytane z
+  plików i strony z dowodami nie są nią sprawdzane.
+
+Modele Guardrails są pobierane przy budowaniu obrazu z ustalonych rewizji
+(`apps/backend/scripts/fetch_guardrails_models.py`, tylko pliki safetensors i
+tokenizery). Lokalnie, poza Dockerem:
+
+```bash
+cd apps/backend
+HF_HOME=~/.cache/prawdowid/hf python scripts/fetch_guardrails_models.py
+export HF_HOME=~/.cache/prawdowid/hf HF_HUB_OFFLINE=1
+```
+
+### Komponenty zewnętrzne i licencje
+
+- [guardrails-ai](https://github.com/guardrails-ai/guardrails) (Apache-2.0) i
+  [guardrails-ai-detect-jailbreak](https://github.com/guardrails-ai/guardrails-hub-monorepo/tree/main/detect_jailbreak/py) (MIT).
+- Modele: `zhx123/ftrobertallm` (MIT), `sentence-transformers/all-MiniLM-L6-v2`
+  i `google-bert/bert-base-cased` (Apache-2.0),
+  `GuardrailsAI/prompt-saturation-attack-detector` (strona modelu nie podaje
+  licencji — do potwierdzenia przed dalszą dystrybucją obrazu).
+
 ## Deduplikacja tez
 
 Powtórzone twierdzenie jest łączone z już zapisaną tezą: najpierw po dokładnym
