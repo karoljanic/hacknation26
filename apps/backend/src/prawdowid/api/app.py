@@ -6,11 +6,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from prawdowid.api.check import router as check_router
+from prawdowid.api.verify import router as verify_router
 from prawdowid.api.x_auth import router as x_auth_router
 from prawdowid.persistence.db import get_session
 
 app = FastAPI(title="Prawdowid API", version="0.1.0")
 app.include_router(check_router)
+app.include_router(verify_router)
 app.include_router(x_auth_router)
 
 

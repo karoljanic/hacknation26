@@ -32,6 +32,13 @@ from prawdowid.domain.enums import Channel, ClaimKind, RunStatus, Strength, Verd
 from prawdowid.domain.preparation import PreparedInput
 from prawdowid.services.pipeline import PipelineResult, VerificationPipeline
 from prawdowid.services.preparation import IMAGE_TYPES, MAX_MEDIA_BYTES, VIDEO_TYPES, NoExtractableContentError
+from prawdowid.security.attestation import (
+    SignableClaim,
+    compute_answer_hash,
+    format_answer_text,
+    get_signing_key,
+    normalize_for_hash,
+)
 
 router = APIRouter(tags=["check"], dependencies=[Depends(admit_check)])
 logger = logging.getLogger(__name__)
@@ -98,6 +105,14 @@ class CheckResponse(BaseModel):
     skipped_claims: list[str] = Field(
         default_factory=list,
         description="Poboczne twierdzenia ze zgłoszenia, których nie sprawdzano (sprawdzane są tylko kluczowe).",
+    )
+    answer_hash: str | None = Field(
+        default=None,
+        description="Podpis HMAC-SHA256 odpowiedzi (liczony kluczem prywatnym po normalizacji tekstu).",
+    )
+    signed_text: str | None = Field(
+        default=None,
+        description="Kanoniczna treść odpowiedzi, na podstawie której wyliczono `answer_hash`.",
     )
 
 
@@ -188,8 +203,35 @@ def _to_check_response(result: PipelineResult) -> "CheckResponse":
         )
         for outcome in result.claims
     ]
+    signed_text: str | None = None
+    answer_hash: str | None = None
+    signing_key = get_signing_key()
+    if signing_key:
+        candidate = format_answer_text(
+            [
+                SignableClaim(
+                    text=c.text,
+                    verdict=c.verdict,
+                    strength=c.strength,
+                    explanation=c.explanation,
+                    limitations=c.limitations,
+                    missing_details=c.missing_details,
+                )
+                for c in claims
+            ],
+            fallback_message=result.message,
+        )
+        if candidate and normalize_for_hash(candidate):
+            signed_text = candidate
+            answer_hash = compute_answer_hash(candidate, secret_key=signing_key)
+
     return CheckResponse(
-        run_id=str(result.run_id), status=result.status, claims=claims, skipped_claims=result.skipped_claims
+        run_id=str(result.run_id),
+        status=result.status,
+        claims=claims,
+        skipped_claims=result.skipped_claims,
+        answer_hash=answer_hash,
+        signed_text=signed_text,
     )
 
 

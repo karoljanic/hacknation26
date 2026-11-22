@@ -2,15 +2,14 @@
 
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 
-// Mirrors the backend's POST /check contract (apps/backend/src/prawdowid/api/check.py).
-// The API also accepts "question"; the form sends questions as text, since
-// claim extraction tells statements and questions apart on its own.
+// Mirrors POST /check and POST /verify contracts in apps/backend/src/prawdowid/api/.
 type InputType = "text" | "url" | "image" | "video";
 
 type ClaimKind = "factual_claim" | "verification_question" | "opinion";
 type Verdict = "confirmed" | "false" | "misleading" | "insufficient_evidence" | "unverifiable";
 type Strength = "strong" | "moderate" | "weak";
 type RunStatus = "pending" | "running" | "ok" | "tech_failure" | "needs_clarification" | "out_of_scope";
+type VerifyStatus = "verified" | "invalid_hash" | "missing_hash" | "unreadable";
 
 type Source = {
   title: string;
@@ -38,6 +37,14 @@ type CheckResponse = {
   message: string | null;
   claims: Claim[];
   skipped_claims?: string[];
+  answer_hash?: string | null;
+};
+
+type VerifyResponse = {
+  authentic: boolean;
+  status: VerifyStatus;
+  message: string;
+  extracted_hash?: string | null;
 };
 
 const MAX_FILE_BYTES = 12_000_000;
@@ -50,7 +57,7 @@ const ACCEPT: Record<"image" | "video", string[]> = {
 const OPTIONS: { value: InputType; label: string; hint: string }[] = [
   { value: "text", label: "Tekst lub pytanie", hint: "wiadomość, wpis, cytat, pytanie" },
   { value: "url", label: "Link", hint: "artykuł, wpis, nagranie" },
-  { value: "image", label: "Zdjęcie", hint: "zdjęcie lub zrzut ekranu" },
+  { value: "image", label: "Zdjęcie", hint: "zdjęcie lub zrzut ekranu (Ctrl+V)" },
   { value: "video", label: "Wideo", hint: "nagranie wideo" },
 ];
 
@@ -82,14 +89,29 @@ const CLAIM_KIND_LABEL: Record<ClaimKind, string> = {
   opinion: "Opinia",
 };
 
+type LoadingMode = "check" | "verify-image";
+
 type State =
   | { kind: "idle" }
-  | { kind: "loading" }
+  | { kind: "loading"; mode: LoadingMode }
   | { kind: "needs-clarification"; message: string | null }
   | { kind: "busy"; message: string; retryAfter: number | null }
   | { kind: "invalid"; message: string }
   | { kind: "error"; message: string }
-  | { kind: "done"; message: string | null; claims: Claim[]; skipped: string[] };
+  | {
+    kind: "done";
+    message: string | null;
+    claims: Claim[];
+    skipped: string[];
+    answerHash: string | null;
+  }
+  | {
+    kind: "verified-output";
+    authentic: boolean;
+    status: VerifyStatus;
+    message: string;
+    extractedHash: string | null;
+  };
 
 function formatSize(bytes: number): string {
   if (bytes < 1_000_000) return `${Math.max(1, Math.round(bytes / 1000))} kB`;
@@ -108,8 +130,6 @@ function validateFile(file: File, type: "image" | "video"): string | null {
   return null;
 }
 
-// Each input type keeps its own values: switching type shows that type's
-// fields (empty at first) and switching back restores what was entered.
 type Draft = { text: string; url: string; file: File | null };
 
 const EMPTY_DRAFT: Draft = { text: "", url: "", file: null };
@@ -134,6 +154,37 @@ export function CheckForm() {
     setDrafts((current) => ({ ...current, [type]: { ...current[type], ...change } }));
   }
 
+  // Pozwala wkleić zrzut ekranu ze schowka (Ctrl+V / Cmd+V) w dowolnym miejscu strony.
+  useEffect(() => {
+    function handleWindowPaste(event: ClipboardEvent) {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (!item.type.startsWith("image/")) continue;
+        const rawFile = item.getAsFile();
+        if (!rawFile) continue;
+
+        event.preventDefault();
+        const ext = rawFile.type.split("/")[1] || "png";
+        const pastedFile = rawFile.name
+          ? rawFile
+          : new File([rawFile], `zrzut-ekranu.${ext}`, { type: rawFile.type });
+        const error = validateFile(pastedFile, "image");
+        setType("image");
+        setFileError(error);
+        setState({ kind: "idle" });
+        setDrafts((current) => ({
+          ...current,
+          image: { ...current.image, file: error ? null : pastedFile },
+        }));
+        break;
+      }
+    }
+
+    window.addEventListener("paste", handleWindowPaste);
+    return () => window.removeEventListener("paste", handleWindowPaste);
+  }, []);
+
   useEffect(() => {
     if (!file || type !== "image") {
       setPreview(null);
@@ -144,8 +195,6 @@ export function CheckForm() {
     return () => URL.revokeObjectURL(objectUrl);
   }, [file, type]);
 
-  // A file input cannot be controlled by React: put the saved file back when
-  // returning to this type, and empty it when the drafts are cleared.
   useEffect(() => {
     const input = fileInput.current;
     if (!input) return;
@@ -172,66 +221,105 @@ export function CheckForm() {
     if (error) event.target.value = "";
   }
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (state.kind === "loading") return; // Enter in a single-field form still submits without the button
-    if (isMedia && !file) {
-      setFileError(type === "image" ? "Wybierz zdjęcie." : "Wybierz nagranie.");
-      return;
+  function handleHttpError(response: Response, detail: string | null) {
+    if (response.status === 429 || response.status === 503) {
+      const retryAfter = Number(response.headers.get("retry-after"));
+      setState({
+        kind: "busy",
+        message: detail ?? "Zbyt wiele zgłoszeń. Spróbuj ponownie za chwilę.",
+        retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null,
+      });
+    } else if ([413, 415, 422].includes(response.status)) {
+      setState({ kind: "invalid", message: detail ?? "Sprawdź, czy wszystkie pola są poprawnie wypełnione." });
+    } else {
+      setState({ kind: "error", message: detail ?? "Usługa jest chwilowo niedostępna." });
     }
+  }
 
+  async function submitCheckRequest() {
     const body = new FormData();
     body.append("type", type);
     if (text.trim()) body.append("text", text.trim());
     if (type === "url") body.append("url", url.trim());
     if (isMedia && file) body.append("file", file);
 
-    setState({ kind: "loading" });
+    setState({ kind: "loading", mode: "check" });
+    const response = await fetch("/api/check", { method: "POST", body });
+    const payload = (await response.json().catch(() => ({}))) as Partial<CheckResponse> & { detail?: unknown };
+    const detail = typeof payload.detail === "string" ? payload.detail : null;
+
+    if (!response.ok) {
+      handleHttpError(response, detail);
+      return;
+    }
+
+    setDrafts(emptyDrafts());
+
+    switch (payload.status) {
+      case "ok":
+        setState({
+          kind: "done",
+          message: payload.message ?? null,
+          claims: payload.claims ?? [],
+          skipped: payload.skipped_claims ?? [],
+          answerHash: payload.answer_hash ?? null,
+        });
+        break;
+      case "needs_clarification":
+        setState({ kind: "needs-clarification", message: payload.message ?? null });
+        break;
+      case "tech_failure":
+      default:
+        setState({
+          kind: "error",
+          message: payload.message ?? "Nie udało się sprawdzić zgłoszenia z powodu błędu technicznego.",
+        });
+    }
+  }
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (state.kind === "loading") return;
+    if (isMedia && !file) {
+      setFileError(type === "image" ? "Wybierz zdjęcie lub wklej zrzut ekranu." : "Wybierz nagranie.");
+      return;
+    }
+
     try {
-      const response = await fetch("/api/check", { method: "POST", body });
-      const payload = (await response.json().catch(() => ({}))) as Partial<CheckResponse> & { detail?: unknown };
-      const detail = typeof payload.detail === "string" ? payload.detail : null;
+      // Obraz -> automatycznie sprawdzamy, czy zawiera podpis (hash) odpowiedzi Prawdowida.
+      // Jeśli nie (zwykłe zdjęcie), przechodzimy do standardowego /api/check.
+      if (type === "image" && file) {
+        const verifyBody = new FormData();
+        verifyBody.append("file", file);
 
-      if (!response.ok) {
-        if (response.status === 429 || response.status === 503) {
-          const retryAfter = Number(response.headers.get("retry-after"));
-          setState({
-            kind: "busy",
-            message: detail ?? "Zbyt wiele zgłoszeń. Spróbuj ponownie za chwilę.",
-            retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null,
-          });
-        } else if ([413, 415, 422].includes(response.status)) {
-          setState({ kind: "invalid", message: detail ?? "Sprawdź, czy wszystkie pola są poprawnie wypełnione." });
+        setState({ kind: "loading", mode: "verify-image" });
+        const verifyResponse = await fetch("/api/verify", { method: "POST", body: verifyBody });
+        const verifyPayload = (await verifyResponse.json().catch(() => ({}))) as Partial<VerifyResponse> & {
+          detail?: unknown;
+        };
+        const verifyDetail = typeof verifyPayload.detail === "string" ? verifyPayload.detail : null;
+
+        if (verifyResponse.ok) {
+          if (verifyPayload.status === "verified" || verifyPayload.status === "invalid_hash") {
+            setDrafts(emptyDrafts());
+            setState({
+              kind: "verified-output",
+              authentic: Boolean(verifyPayload.authentic),
+              status: verifyPayload.status,
+              message: verifyPayload.message ?? "Zakończono weryfikację zrzutu ekranu.",
+              extractedHash: verifyPayload.extracted_hash ?? null,
+            });
+            return;
+          }
+        } else if (verifyResponse.status === 503) {
+          // Brak skonfigurowanego PRAWDOWID_SIGNING_KEY nie blokuje zwykłego sprawdzania zdjęć.
         } else {
-          setState({ kind: "error", message: detail ?? "Usługa jest chwilowo niedostępna." });
+          handleHttpError(verifyResponse, verifyDetail);
+          return;
         }
-        return;
       }
 
-      // Accepted: clear every type's fields so a new check starts fresh. On
-      // a validation or technical error they stay, so the request can be
-      // corrected or resent without retyping it.
-      setDrafts(emptyDrafts());
-
-      switch (payload.status) {
-        case "ok":
-          setState({
-            kind: "done",
-            message: payload.message ?? null,
-            claims: payload.claims ?? [],
-            skipped: payload.skipped_claims ?? [],
-          });
-          break;
-        case "needs_clarification":
-          setState({ kind: "needs-clarification", message: payload.message ?? null });
-          break;
-        case "tech_failure":
-        default:
-          setState({
-            kind: "error",
-            message: payload.message ?? "Nie udało się sprawdzić zgłoszenia z powodu błędu technicznego.",
-          });
-      }
+      await submitCheckRequest();
     } catch {
       setState({ kind: "error", message: "Nie można połączyć się z serwerem strony." });
     }
@@ -243,7 +331,7 @@ export function CheckForm() {
     type === "text"
       ? "Wklej wiadomość, wpis lub cytat albo zadaj pytanie, na które da się odpowiedzieć „tak” lub „nie”, np. „Czy we Włoszech ostatnio odbywał się strajk generalny?”. Nie podawaj danych osobowych."
       : type === "image"
-        ? "Co dokładnie chcesz sprawdzić? Na przykład: Czy to zdjęcie jest aktualne?"
+        ? "Co dokładnie chcesz sprawdzić? Jeśli wklejasz zrzut ekranu odpowiedzi Prawdowida z hashem, rozpoznamy go automatycznie."
         : type === "video"
           ? "Co dokładnie chcesz sprawdzić? Na przykład: Czy to nagranie pokazuje tegoroczny protest?"
           : "Co dokładnie chcesz sprawdzić? Na przykład: Czy ten artykuł podaje prawdziwe dane?";
@@ -297,7 +385,9 @@ export function CheckForm() {
               {type === "image" ? "Zdjęcie lub zrzut ekranu" : "Nagranie wideo"}
             </label>
             <p id={`${ids}-file-hint`} className="field__hint">
-              {type === "image" ? "JPG, PNG lub WebP" : "MP4, WebM lub MOV"}, maksymalnie 12 MB.
+              {type === "image"
+                ? "JPG, PNG lub WebP, maksymalnie 12 MB. Wybierz plik albo wklej zrzut ekranu ze schowka (Ctrl+V / Cmd+V)."
+                : "MP4, WebM lub MOV, maksymalnie 12 MB."}
             </p>
             {fileError && (
               <p id={`${ids}-file-error`} className="field__error">
@@ -346,7 +436,7 @@ export function CheckForm() {
         </div>
 
         {state.kind === "loading" ? (
-          <SearchProgress />
+          <SearchProgress mode={state.mode} />
         ) : (
           <button type="submit" className="button">
             Sprawdź
@@ -361,8 +451,6 @@ export function CheckForm() {
   );
 }
 
-// Timed approximation of the pipeline stages: the API reports no progress, so
-// this only paces the wait and never claims a stage finished on the server.
 const SEARCH_STAGES = [
   "Wyodrębniam twierdzenia do sprawdzenia",
   "Przeszukuję bazy fact-checkerów",
@@ -373,16 +461,28 @@ const SEARCH_STAGES = [
 ];
 const STAGE_INTERVAL_MS = 3500;
 
-function SearchProgress() {
+function SearchProgress({ mode }: { mode: LoadingMode }) {
   const [stage, setStage] = useState(0);
 
   useEffect(() => {
+    if (mode !== "check") return;
+    setStage(0);
     const timer = setInterval(
       () => setStage((current) => Math.min(current + 1, SEARCH_STAGES.length - 1)),
       STAGE_INTERVAL_MS,
     );
     return () => clearInterval(timer);
-  }, []);
+  }, [mode]);
+
+  if (mode === "verify-image") {
+    return (
+      <div className="search-progress" role="status">
+        <p className="search-progress__single">
+          Analizuję obraz i sprawdzam podpis odpowiedzi Prawdowida…
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="search-progress" role="status">
@@ -452,12 +552,35 @@ function Result({ state }: { state: State }) {
           <p>{state.message ?? "Usługa jest chwilowo niedostępna. Spróbuj ponownie później."}</p>
         </div>
       );
+    case "verified-output": {
+      const alertClass = state.authentic ? "alert--success" : "alert--error";
+      const title = state.authentic
+        ? "Odpowiedź autentyczna – wygenerowana przez Prawdowid"
+        : "Odpowiedź nieautentyczna lub zmodyfikowana";
+
+      return (
+        <div className={`alert ${alertClass} verify-result`}>
+          <p className="alert__title">{title}</p>
+          <p>{state.message}</p>
+          {state.extractedHash && (
+            <p className="verify-result__hash">
+              <strong>Odczytany hash:</strong> <code>{state.extractedHash}</code>
+            </p>
+          )}
+        </div>
+      );
+    }
     case "done":
       if (state.claims.length === 0) {
         return (
-          <div className="alert alert--info">
-            <p className="alert__title">Brak twierdzeń do sprawdzenia</p>
-            <p>{state.message ?? "Nie znaleziono w zgłoszeniu żadnej tezy wymagającej weryfikacji."}</p>
+          <div className="results">
+            <div className="alert alert--info">
+              <div className="alert__header">
+                <p className="alert__title">Brak twierdzeń do sprawdzenia</p>
+                {state.answerHash && <HashBadge hash={state.answerHash} />}
+              </div>
+              <p>{state.message ?? "Nie znaleziono w zgłoszeniu żadnej tezy wymagającej weryfikacji."}</p>
+            </div>
           </div>
         );
       }
@@ -469,7 +592,11 @@ function Result({ state }: { state: State }) {
             </div>
           )}
           {state.claims.map((claim, index) => (
-            <ClaimResult key={`${claim.text}-${index}`} claim={claim} />
+            <ClaimResult
+              key={`${claim.text}-${index}`}
+              claim={claim}
+              answerHash={index === 0 ? state.answerHash : null}
+            />
           ))}
           {state.skipped.length > 0 && (
             <details className="skipped-claims">
@@ -491,13 +618,37 @@ function Result({ state }: { state: State }) {
   }
 }
 
-function ClaimResult({ claim }: { claim: Claim }) {
+function HashBadge({ hash }: { hash: string }) {
+  const tooltipId = useId();
+  return (
+    <span className="answer-hash">
+      <code className="answer-hash__code">{hash}</code>
+      <span className="answer-hash__help">
+        <button
+          type="button"
+          className="answer-hash__help-button"
+          aria-label="Co oznacza ten podpis?"
+          aria-describedby={tooltipId}
+        >
+          ?
+        </button>
+        <span id={tooltipId} role="tooltip" className="answer-hash__tooltip">
+          Kryptograficzny podpis odpowiedzi Prawdowida. Prześlij lub wklej zrzut ekranu tej odpowiedzi w polu
+          zdjęcia powyżej (np. Ctrl+V), aby potwierdzić, że nie została zmieniona.
+        </span>
+      </span>
+    </span>
+  );
+}
+
+function ClaimResult({ claim, answerHash }: { claim: Claim; answerHash: string | null }) {
   return (
     <article className="claim-result">
       <p className="claim-result__kind">{CLAIM_KIND_LABEL[claim.kind]}</p>
       <h3 className="claim-result__text">{claim.text}</h3>
       <div className="claim-result__badges">
         <span className={`verdict ${VERDICT_STYLE[claim.verdict]}`}>{VERDICT_LABEL[claim.verdict]}</span>
+        {answerHash && <HashBadge hash={answerHash} />}
         <span className="strength">{STRENGTH_LABEL[claim.strength]}</span>
         {claim.basis === "general_knowledge" && (
           <span className="basis-badge">Wiedza ogólna – bez źródła</span>
