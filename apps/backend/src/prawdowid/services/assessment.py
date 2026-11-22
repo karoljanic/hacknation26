@@ -63,11 +63,6 @@ of the same site), from a catalogued trusted source: it shows what that
 source itself says, so it answers questions about its content ("czy ten
 poradnik zaleca...") directly.
 
-An item with source "wikipedia" (tier 3) is a citable encyclopedia: fine for
-established historical, geographic and scientific facts, weaker than official
-sources and fact-checkers, which win when they disagree; never rely on it alone
-for current events.
-
 General knowledge: only for a claim whose general_knowledge_allowed is true, and
 only when no evidence item settles it, you may answer from well-established,
 uncontroversial general knowledge (e.g. the Battle of Grunwald took place on 15
@@ -700,7 +695,6 @@ SOURCE_LABELS = {
     "gov_pl": "serwisy urzędów w gov.pl",
     "gov_pl_search": "wyszukiwarka gov.pl",
     "odyseusz": "komunikaty MSZ dla podróżujących (Odyseusz)",
-    "wikipedia": "Wikipedia",
     "official_site": "serwisy instytucji publicznych",
     "imgw": "dane IMGW-PIB",
     "submitted_page": "podana strona",

@@ -31,7 +31,6 @@ from prawdowid.persistence.db import session_factory
 from prawdowid.persistence.models import EMBEDDING_DIM
 from prawdowid.services.assessment import AssessmentGenerator
 from prawdowid.adapters.sources.gov_api import GovPlSearchClient, OdyseuszClient
-from prawdowid.adapters.sources.wikipedia import WikipediaClient
 from prawdowid.services.claim_selection import ClaimSelector
 from prawdowid.services.claims import ClaimExtractor
 from prawdowid.services.evidence_search import EvidenceSearchOrchestrator
@@ -100,11 +99,10 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
         # Not opened here: the MCP connection must not wrap the whole check
         # (a transport failure cancels everything inside it). The evidence
         # search opens it only around its EUvsDisinfo queries.
-        # Keyless public APIs (Karol's providers): gov.pl site search, MSZ
-        # Odyseusz travel advisories and Polish Wikipedia.
+        # Keyless public APIs (Karol's providers): gov.pl site search and MSZ
+        # Odyseusz travel advisories.
         gov_search = stack.enter_context(GovPlSearchClient())
         odyseusz = stack.enter_context(OdyseuszClient())
-        wikipedia = stack.enter_context(WikipediaClient())
         euvsdisinfo_connect = None
         if euvsdisinfo_key:
             connection = EUvsDisinfoConnection(api_key=euvsdisinfo_key)
@@ -135,7 +133,6 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
             else None,
             gov_search=gov_search,
             odyseusz=odyseusz,
-            wikipedia=wikipedia,
         )
         sublinks = SublinkSelector(decision=decision, preparer=preparer)
         assessment = AssessmentGenerator(

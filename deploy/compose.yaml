@@ -93,6 +93,7 @@ services:
       CHECK_GLOBAL_LIMIT_PER_DAY: ${CHECK_GLOBAL_LIMIT_PER_DAY:-5000}
       CHECK_MAX_CONCURRENT: ${CHECK_MAX_CONCURRENT:-8}
       CHECK_TRUST_FORWARDED_FOR: ${CHECK_TRUST_FORWARDED_FOR:-}
+      PRAWDOWID_SIGNING_KEY: ${PRAWDOWID_SIGNING_KEY:-}
     command: ["uvicorn", "prawdowid.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     volumes:
       - x_auth_data:/home/app/.local/share/prawdowid

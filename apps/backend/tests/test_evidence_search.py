@@ -7,7 +7,6 @@ import pytest
 from pydantic import HttpUrl
 
 from prawdowid.adapters.sources.gov_api import CountryAdvisory, GovPlSearchClient, GovSearchHit, OdyseuszClient
-from prawdowid.adapters.sources.wikipedia import WikipediaArticle, WikipediaClient
 from prawdowid.domain.evidence import ClaimForVerification, EvidenceItem
 from prawdowid.domain.euvsdisinfo import EUvsDisinfoResult
 from prawdowid.domain.fact_checks import FactCheckClaim, FactCheckPage, FactCheckPublisher, FactCheckReview, FactCheckSource
@@ -328,34 +327,6 @@ def test_odyseusz_outage_is_reported_not_hidden() -> None:
     )
 
     assert result.claims[0].unavailable_sources == ["odyseusz"]
-
-
-def test_wikipedia_articles_become_citable_tier3_items_and_outages_are_reported() -> None:
-    google = Mock(spec=FactCheckSource)
-    google.search_text.return_value = google_page([])
-    euvsdisinfo = Mock()
-    euvsdisinfo.search = AsyncMock(return_value=euvsdisinfo_result([]))
-    wikipedia = Mock(spec=WikipediaClient)
-    wikipedia.search.return_value = ["Bitwa pod Grunwaldem"]
-    wikipedia.intros.return_value = [
-        WikipediaArticle("Bitwa pod Grunwaldem", "https://pl.wikipedia.org/wiki/Bitwa_pod_Grunwaldem", "Stoczona 15 lipca 1410.")
-    ]
-    target = ClaimForVerification(
-        id="c1", text="Kiedy była bitwa pod Grunwaldem?", kind="verification_question",
-        search_queries=["bitwa pod Grunwaldem", "Grunwald 1410"],
-    )
-    orchestrator = EvidenceSearchOrchestrator(google=google, euvsdisinfo=euvsdisinfo, wikipedia=wikipedia)
-
-    result = asyncio.run(orchestrator.search([target]))
-
-    items = [item for item in result.claims[0].items if item.source == "wikipedia"]
-    assert [(item.title, item.catalog_slug, item.snippet) for item in items] == [
-        ("Bitwa pod Grunwaldem", "wikipedia-pl", "Stoczona 15 lipca 1410.")
-    ]
-    wikipedia.intros.assert_called_once_with(["Bitwa pod Grunwaldem"])
-
-    wikipedia.search.side_effect = httpx.ConnectError("down")
-    assert asyncio.run(orchestrator.search([target])).claims[0].unavailable_sources == ["wikipedia"]
 
 
 def test_unconfigured_providers_are_reported_as_unavailable() -> None:

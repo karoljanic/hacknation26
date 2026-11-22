@@ -613,7 +613,7 @@ Lista aktualności czy zrzut API to dziesiątki tysięcy znaków o innych sprawa
 więc do oceny trafiają tylko dokumenty i fragmenty mające najwięcej słów
 wspólnych z tezą i jej frazami wyszukiwania (`services/relevance.py`).
 Niezależnie od tego zawsze odpytywane są Google Fact Check, EUvsDisinfo,
-wyszukiwarka gov.pl, Odyseusz (MSZ, dla krajów z tezy) i Wikipedia.
+wyszukiwarka gov.pl i Odyseusz (MSZ, dla krajów z tezy).
 
 ### Test na prawdziwych faktach
 
