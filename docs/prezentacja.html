@@ -1,0 +1,1301 @@
+<!doctype html>
+<html lang="pl">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prawdowid – prezentacja</title>
+  <style>
+    /* Same tokens as apps/web/src/app/globals.css (gov.pl-like public-service look). */
+    :root {
+      --color-text: #1b1b1b;
+      --color-muted: #4a4a4a;
+      --color-primary: #0052a5;
+      --color-primary-dark: #003e7e;
+      --color-accent: #d4213d;
+      --color-border: #c8c8c8;
+      --color-surface: #f2f2f2;
+      --color-bg: #ffffff;
+      --color-success-bg: #e6f4ea;
+      --color-success-border: #1e7b34;
+      --color-error-bg: #fdecee;
+      --color-error-border: #b3261e;
+      --color-warning-bg: #fff6e0;
+      --color-warning-border: #a86500;
+      --color-info-bg: #e8f0fa;
+      --font: "Lato", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+      --radius: 4px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: #d9d9d9;
+      font-family: var(--font);
+      color: var(--color-text);
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 32px;
+      padding: 32px 0;
+    }
+
+    /* -- slide frame (1280x720) ---------------------------------------------- */
+    .slide {
+      width: 1280px;
+      height: 720px;
+      flex: none;
+      background: var(--color-bg);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+    }
+
+    .slide__header {
+      flex: none;
+      height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 56px;
+      border-bottom: 4px solid var(--color-accent);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--color-text);
+    }
+
+    .brand__mark {
+      width: 40px;
+      height: 40px;
+      flex: none;
+      color: var(--color-text);
+    }
+
+    .brand__text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+    }
+
+    .brand__name {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .brand__tagline {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--color-muted);
+    }
+
+    .crumbs {
+      font-size: 15px;
+      color: var(--color-muted);
+    }
+
+    .crumbs b {
+      color: var(--color-text);
+    }
+
+    .slide__body {
+      flex: 1;
+      padding: 32px 56px 20px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .slide__footer {
+      flex: none;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 56px;
+      background: var(--color-surface);
+      border-top: 1px solid var(--color-border);
+      font-size: 13px;
+      color: var(--color-muted);
+    }
+
+    h1 {
+      font-size: 64px;
+      line-height: 1.1;
+      margin: 0 0 16px;
+    }
+
+    h2 {
+      font-size: 34px;
+      line-height: 1.2;
+      margin: 0 0 22px;
+    }
+
+    h3 {
+      font-size: 19px;
+      margin: 0 0 6px;
+    }
+
+    p,
+    li {
+      font-size: 20px;
+      line-height: 1.5;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    ul,
+    ol {
+      margin: 0;
+      padding-left: 26px;
+    }
+
+    li+li {
+      margin-top: 6px;
+    }
+
+    code {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+    }
+
+    .lead {
+      font-size: 25px;
+      color: var(--color-muted);
+      max-width: 900px;
+    }
+
+    .muted {
+      color: var(--color-muted);
+    }
+
+    .small {
+      font-size: 15px;
+    }
+
+    .kicker {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-primary);
+      margin: 0 0 8px;
+    }
+
+    /* Placeholder to fill in before exporting. */
+    .todo {
+      background: #fff3b0;
+      padding: 0 6px;
+      border-radius: 3px;
+      font-weight: 700;
+    }
+
+    /* -- layout -------------------------------------------------------------- */
+    .cols {
+      display: grid;
+      gap: 28px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .cols--2 {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .cols--3 {
+      grid-template-columns: repeat(3, 1fr);
+      flex: none;
+    }
+
+    .cols--4 {
+      grid-template-columns: repeat(4, 1fr);
+      flex: none;
+    }
+
+    .cols--60 {
+      grid-template-columns: 1.25fr 1fr;
+    }
+
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .stack--centered {
+      justify-content: center;
+    }
+
+    .stack--spaced {
+      gap: 48px;
+    }
+
+    .mt {
+      margin-top: 22px;
+    }
+
+    /* -- components as in the app ------------------------------------------- */
+    .card {
+      border: 2px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      background: var(--color-bg);
+    }
+
+    .card--surface {
+      background: var(--color-surface);
+      border-color: var(--color-surface);
+    }
+
+    .card p,
+    .card li {
+      font-size: 17px;
+      margin: 0;
+    }
+
+    .alert {
+      border-left: 6px solid;
+      padding: 14px 18px;
+    }
+
+    .alert p {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .alert__title {
+      font-weight: 700;
+    }
+
+    .alert--info {
+      background: var(--color-info-bg);
+      border-color: var(--color-primary);
+    }
+
+    .alert--warning {
+      background: var(--color-warning-bg);
+      border-color: var(--color-warning-border);
+    }
+
+    .alert--error {
+      background: var(--color-error-bg);
+      border-color: var(--color-error-border);
+    }
+
+    .claim-result {
+      border: 2px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 18px 22px;
+      align-self: start;
+    }
+
+    .claim-result__kind {
+      margin: 0 0 4px;
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--color-muted);
+    }
+
+    .claim-result__text {
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0 0 10px;
+    }
+
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .claim-result__explanation {
+      font-size: 17px;
+      margin: 0 0 8px;
+    }
+
+    .verdict {
+      display: inline-block;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 3px 12px;
+      border-radius: 999px;
+      border: 2px solid transparent;
+    }
+
+    .verdict--confirmed {
+      background: var(--color-success-bg);
+      border-color: var(--color-success-border);
+      color: var(--color-success-border);
+    }
+
+    .verdict--false {
+      background: var(--color-error-bg);
+      border-color: var(--color-error-border);
+      color: var(--color-error-border);
+    }
+
+    .verdict--misleading {
+      background: var(--color-warning-bg);
+      border-color: var(--color-warning-border);
+      color: var(--color-warning-border);
+    }
+
+    .verdict--unknown {
+      background: var(--color-surface);
+      border-color: var(--color-muted);
+      color: var(--color-muted);
+    }
+
+    .hash {
+      font-size: 13px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      padding: 3px 8px;
+      border-radius: var(--radius);
+    }
+
+    .strength {
+      font-size: 15px;
+      color: var(--color-muted);
+    }
+
+    .sources {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .sources__title {
+      font-weight: 700;
+      font-size: 15px;
+      margin: 0 0 6px;
+    }
+
+    .source {
+      font-size: 15px;
+    }
+
+    .source__title {
+      color: var(--color-primary);
+      font-weight: 700;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .source__quote {
+      margin: 4px 0 0;
+      padding-left: 12px;
+      border-left: 3px solid var(--color-border);
+      color: var(--color-muted);
+      font-style: italic;
+      font-size: 15px;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    .kpi-card {
+      border: 1px solid var(--color-border);
+      border-top: 4px solid var(--color-primary);
+      padding: 12px 16px;
+    }
+
+    .kpi-card__label {
+      font-size: 14px;
+      color: var(--color-muted);
+    }
+
+    .kpi-card__value {
+      display: block;
+      font-size: 34px;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .kpi-card__hint {
+      font-size: 13px;
+      color: var(--color-muted);
+    }
+
+    .centered-content {
+      margin: auto 0;
+    }
+
+    .sources-slide__content .kpi-grid {
+      margin-bottom: 48px;
+    }
+
+    .sources-slide__content .kpi-card__label {
+      font-size: 17px;
+    }
+
+    .sources-slide__content .kpi-card__value {
+      font-size: 40px;
+    }
+
+    .sources-slide__content .kpi-card__hint {
+      font-size: 15px;
+    }
+
+    .sources-slide__content .card h3 {
+      font-size: 22px;
+    }
+
+    .sources-slide__content .card p {
+      font-size: 20px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 17px;
+      align-self: start;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--color-border);
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--color-surface);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--color-muted);
+    }
+
+    td.num {
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    /* -- architecture -------------------------------------------------------- */
+    .flow {
+      display: flex;
+      align-items: stretch;
+      gap: 6px;
+    }
+
+    .flow__step {
+      flex: 1;
+      border: 2px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 12px 10px;
+      min-width: 0;
+    }
+
+    .flow__step h3 {
+      font-size: 19px;
+      color: var(--color-primary);
+      margin-bottom: 4px;
+    }
+
+    .flow__step p {
+      font-size: 17px;
+      line-height: 1.4;
+      margin: 0;
+    }
+
+    .flow__arrow {
+      flex: none;
+      align-self: center;
+      color: var(--color-accent);
+      font-size: 26px;
+      font-weight: 700;
+    }
+
+    /* -- sequence diagram ---------------------------------------------------- */
+    .seq {
+      --cols: 6;
+      position: relative;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      margin-top: 4px;
+    }
+
+    .seq__line {
+      position: absolute;
+      top: 38px;
+      bottom: 0;
+      width: 0;
+      border-left: 2px dashed var(--color-border);
+      transform: translateX(-1px);
+    }
+
+    .seq__heads {
+      display: grid;
+      grid-template-columns: repeat(var(--cols), 1fr);
+      gap: 10px;
+      position: relative;
+      z-index: 1;
+      margin-bottom: 6px;
+    }
+
+    .seq__head {
+      border: 2px solid var(--color-primary);
+      border-radius: var(--radius);
+      background: var(--color-bg);
+      color: var(--color-primary);
+      font-size: 15px;
+      font-weight: 700;
+      text-align: center;
+      padding: 6px 4px;
+      line-height: 1.2;
+    }
+
+    .seq__head small {
+      display: block;
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--color-muted);
+    }
+
+    .seq__row {
+      position: relative;
+      flex: 1;
+      min-height: 30px;
+    }
+
+    .seq__msg {
+      position: absolute;
+      bottom: 6px;
+      height: 0;
+      border-top: 2px solid var(--color-text);
+    }
+
+    .seq__msg::after {
+      content: "";
+      position: absolute;
+      top: -7px;
+      right: -2px;
+      border: 6px solid transparent;
+      border-left: 10px solid var(--color-text);
+      border-right: 0;
+    }
+
+    .seq__msg--back {
+      border-top-style: dashed;
+      border-color: var(--color-primary);
+    }
+
+    .seq__msg--back::after {
+      right: auto;
+      left: -2px;
+      border-left: 0;
+      border-right: 10px solid var(--color-primary);
+    }
+
+    .seq__label {
+      position: absolute;
+      bottom: 10px;
+      font-size: 15px;
+      line-height: 1.2;
+      white-space: nowrap;
+      background: var(--color-bg);
+      padding: 0 4px;
+    }
+
+    .seq__num {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--color-accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      line-height: 20px;
+      margin-right: 6px;
+    }
+
+    .seq__self {
+      position: absolute;
+      bottom: 0;
+      height: 24px;
+      width: 26px;
+      border: 2px solid var(--color-text);
+      border-left: 0;
+      border-radius: 0 6px 6px 0;
+    }
+
+    /* -- title slide --------------------------------------------------------- */
+    .title-slide .slide__body {
+      justify-content: center;
+      padding: 0 96px;
+    }
+
+    .brand--title {
+      gap: 30px;
+      margin-bottom: 30px;
+    }
+
+    .brand--title .brand__mark {
+      width: 120px;
+      height: 120px;
+    }
+
+    .brand--title .brand__name {
+      font-size: 72px;
+      line-height: 1.05;
+    }
+
+    .brand--title .brand__tagline {
+      font-size: 32px;
+    }
+
+    .rule {
+      width: 120px;
+      height: 6px;
+      background: var(--color-accent);
+      margin: 8px 0 26px;
+    }
+
+    /* -- presenting: one slide per screen ------------------------------------ */
+    .hint {
+      font-size: 14px;
+      color: #333;
+      margin: 0;
+    }
+
+    body.present {
+      background: #000;
+      padding: 0;
+      gap: 0;
+      height: 100vh;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    body.present .hint {
+      display: none;
+    }
+
+    body.present .slide {
+      display: none;
+      box-shadow: none;
+    }
+
+    body.present .slide.is-active {
+      display: flex;
+    }
+
+    @media print {
+      @page {
+        size: 1280px 720px;
+        margin: 0;
+      }
+
+      html,
+      body {
+        background: #fff;
+        padding: 0;
+        gap: 0;
+        display: block;
+      }
+
+      .hint {
+        display: none;
+      }
+
+      .slide {
+        box-shadow: none;
+        break-after: page;
+        transform: none !important;
+      }
+
+      .slide:last-of-type {
+        break-after: auto;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <p class="hint">←/→ lub spacja: kolejny slajd · <b>P</b>: tryb prezentacji · Ctrl+P → „Zapisz jako PDF”, marginesy:
+    brak, grafika tła: włączona</p>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="mark" viewBox="0 0 32 32">
+      <rect x="1" y="1" width="30" height="30" rx="4" fill="#fff" stroke="currentColor" stroke-width="2" />
+      <path d="M9 16.5l4.5 4.5L23 11" fill="none" stroke="#d4213d" stroke-width="3.5" stroke-linecap="round"
+        stroke-linejoin="round" />
+    </symbol>
+  </svg>
+
+  <template id="header">
+    <header class="slide__header">
+      <span class="brand"><svg class="brand__mark">
+          <use href="#mark" />
+        </svg><span class="brand__text"><span class="brand__name">Prawdowid</span><span
+            class="brand__tagline">Weryfikacja informacji</span></span></span>
+      <span class="crumbs">Prawdowid › <b></b></span>
+    </header>
+  </template>
+
+  <!-- 1 --------------------------------------------------------------------------->
+  <section class="slide title-slide" data-title="">
+    <div class="slide__body">
+      <h1 class="brand brand--title"><svg class="brand__mark" aria-hidden="true">
+          <use href="#mark" />
+        </svg><span class="brand__text"><span class="brand__name">Prawdowid</span><span
+            class="brand__tagline">Weryfikacja informacji</span></span></h1>
+      <p class="lead">Szybka i łatwa weryfikacja informacji oparta na wiarygodnych źródłach</p>
+      <div class="rule"></div>
+      <p class="muted">Zespół <strong>Java Haters</strong> · HackNation 2026 · zadanie Ministerstwa Spraw Zagranicznych
+      </p>
+      <p class="muted">Karol Janic, Mikołaj Krupiński, Dawid Walczak, Albert Kołodziejski</p>
+    </div>
+  </section>
+
+  <!-- 2 --------------------------------------------------------------------------->
+  <section class="slide" data-title="Problem">
+    <div class="slide__body">
+      <p class="kicker">Problem i użytkownicy</p>
+      <h2>Obywatel trafia na doniesienie i nie wie, czy mu wierzyć</h2>
+      <div class="cols cols--60">
+        <ul>
+          <li>Manipulacja informacją łączy prawdziwe fakty z opiniami oraz wypowiedziami wyrwanymi z kontekstu.</li>
+          <li>Treść przychodzi jako tekst, link, zrzut ekranu albo nagranie,<br>często w komunikatorze.</li>
+          <li>Część jest prawdziwa, ale nieaktualna; część ma poprawne dane,<br>ale błędny wniosek.</li>
+          <li>Czaty AI odpowiadają pewnie, nawet gdy zmyślają.</li>
+        </ul>
+        <div class="stack">
+          <div class="alert alert--info">
+            <p class="alert__title">Obywatel</p>
+            <p>Także o niskich kompetencjach cyfrowych: bez instalowania aplikacji i bez znajomości metod weryfikacji.
+            </p>
+          </div>
+          <div class="alert alert--info">
+            <p class="alert__title">Administrator / Analityk</p>
+            <p>Widzi powtarzające się pytania bez odpowiedzi i próby manipulacji.</p>
+          </div>
+        </div>
+      </div>
+      <div class="alert alert--warning" style="margin: auto 0 56px">
+        <p class="alert__title">Zasada</p>
+        <p>Każda teza prowadzi do konkretnego źródła. Gdy brakuje wiarygodnych dowodów, odpowiadamy „Nie wiem” zamiast zgadywać.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 --------------------------------------------------------------------------->
+  <section class="slide" data-title="Jak to działa">
+    <div class="slide__body">
+      <p class="kicker">Rozwiązanie</p>
+      <h2>Wklejasz – dostajesz werdykt, uzasadnienie i źródło</h2>
+      <div class="cols cols--2">
+        <ol class="stack">
+          <li>Wklejasz tekst, link, zdjęcie lub wideo na stronie albo piszesz DM do <b>@prawdowid</b> na X.</li>
+          <li>System wydobywa twierdzenia i wybiera te kluczowe.</li>
+          <li>Szuka w fact-checkach, bazie EUvsDisinfo i źródłach urzędowych.</li>
+          <li>Odpowiada prostym językiem: werdykt, siła podstawy, dokładny cytat, link.</li>
+          <li>Każda odpowiedź ma podpis SHA256 z tajnym kluczem,<br>więc nikt nie podrobi naszego werdyktu.</li>
+        </ol>
+        <article class="claim-result">
+          <p class="claim-result__kind">Pytanie</p>
+          <p class="claim-result__text">Czy Ukraina jest odpowiedzialna za rakiety, które spadły w Polsce 21 listopada
+            2026 r.?</p>
+          <div class="badges">
+            <span class="verdict verdict--false">Fałszywe</span>
+            <code class="hash">cb1d468860cadeccaa51483a83f9556e</code>
+            <span class="strength">Silna podstawa</span>
+          </div>
+          <p class="claim-result__explanation">Nie. Za obiekty, które naruszyły polską przestrzeń powietrzną, odpowiada
+            Rosja. Premier i polskie władze potwierdziły, że pochodziły z Rosji.</p>
+          <div class="sources">
+            <p class="sources__title">Źródła</p>
+            <div class="source"><span class="source__title">Rosyjskie obiekty naruszyły polską przestrzeń
+                powietrzną</span> <span class="muted">– KPRM, gov.pl</span>
+              <p class="source__quote"><span class="todo">[dosłowny cytat ze zrzutu odpowiedzi]</span></p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 --------------------------------------------------------------------------->
+  <section class="slide" data-title="Architektura">
+    <div class="slide__body">
+      <p class="kicker">Architektura i przepływ danych</p>
+      <h2>Kanały oddzielone od logiki weryfikacji</h2>
+      <div class="flow">
+        <div class="flow__step">
+          <h3>Kanały</h3>
+          <p>Strona WWW<br>DM na X<br>ta sama logika</p>
+        </div>
+        <span class="flow__arrow">→</span>
+        <div class="flow__step">
+          <h3>Wejście</h3>
+          <p>Walidacja, limity, detektor prompt injection, maskowanie danych</p>
+        </div>
+        <span class="flow__arrow">→</span>
+        <div class="flow__step">
+          <h3>Przygotowanie</h3>
+          <p>Strona, PDF, OCR zdjęcia, wideo, udostępniony wpis</p>
+        </div>
+        <span class="flow__arrow">→</span>
+        <div class="flow__step">
+          <h3>Twierdzenia</h3>
+          <p>Wydobycie tez z&nbsp;dokładnymi datami i&nbsp;wybór najważniejszych z&nbsp;nich</p>
+        </div>
+        <span class="flow__arrow">→</span>
+        <div class="flow__step">
+          <h3>Dowody</h3>
+          <p>Fact-checki, EUvsDisinfo, gov.pl, MSZ Odyseusz, IMGW, serwisy urzędowe</p>
+        </div>
+        <span class="flow__arrow">→</span>
+        <div class="flow__step">
+          <h3>Ocena</h3>
+          <p>Werdykt z cytatem, kontrola dokładności, podpis</p>
+        </div>
+      </div>
+      <div class="cols cols--3" style="margin: auto 0 56px">
+        <div class="card card--surface">
+          <h3>Modele (wymienne adaptery)</h3>
+          <p>Gemini Flash: odczyt, tezy, ocena<br>Jev (TypeSafe): szybkie decyzje<br>Gemini Embedding: podobne tezy i
+            obrazy</p>
+        </div>
+        <div class="card card--surface">
+          <h3>Dane</h3>
+          <p>PostgreSQL + pgvector: zgłoszenia, tezy, oceny, przebiegi oraz odpowiedzi zapamiętane na dobę</p>
+        </div>
+        <div class="card card--surface">
+          <h3>Technologie</h3>
+          <p>Python (FastAPI): logika weryfikacji i API<br>React (Next.js): strona WWW<br>Docker Compose: proste uruchomienie</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 --------------------------------------------------------------------------->
+  <section class="slide" data-title="Przepływ danych">
+    <div class="slide__body">
+      <p class="kicker">Szczegółowa architektura</p>
+      <h2>Jedno zgłoszenie krok po kroku</h2>
+      <div class="seq">
+        <span class="seq__line" style="left: 8.333%"></span>
+        <span class="seq__line" style="left: 25.000%"></span>
+        <span class="seq__line" style="left: 41.667%"></span>
+        <span class="seq__line" style="left: 58.333%"></span>
+        <span class="seq__line" style="left: 75.000%"></span>
+        <span class="seq__line" style="left: 91.667%"></span>
+        <div class="seq__heads">
+          <div class="seq__head">Użytkownik<small>WWW lub DM na X</small></div>
+          <div class="seq__head">API<small>FastAPI</small></div>
+          <div class="seq__head">Jev<small>TypeSafe</small></div>
+          <div class="seq__head">Gemini<small>Flash</small></div>
+          <div class="seq__head">Źródła<small>fact-checki, urzędy</small></div>
+          <div class="seq__head">Baza<small>PostgreSQL + pgvector</small></div>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 8.333%; width: 16.667%"></span>
+          <span class="seq__label" style="left: calc(8.333% + 6px)"><span class="seq__num">1</span>Tekst, link, zdjęcie, wideo lub wpis z X</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 25.000%; width: 16.667%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 6px)"><span class="seq__num">2</span>Czy to próba prompt injection?</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 25.000%; width: 33.333%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 6px)"><span class="seq__num">3</span>Odczyt treści i wydobycie tez z dokładnymi datami</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 25.000%; width: 16.667%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 6px)"><span class="seq__num">4</span>Wybór najważniejszych tez, maks. 3</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 25.000%; width: 66.667%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 6px)"><span class="seq__num">5</span>Ta sama teza w ostatniej dobie? Wyszukiwanie po wektorach embeddingów, potwierdza Jev</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 25.000%; width: 50.000%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 6px)"><span class="seq__num">6</span>Równolegle: Google Fact Check, EUvsDisinfo, gov.pl, Odyseusz, IMGW</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 25.000%; width: 16.667%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 6px)"><span class="seq__num">7</span>Które źródła pobrać w całości? Maks. 3 na tezę</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 25.000%; width: 33.333%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 6px)"><span class="seq__num">8</span>Ocena wyłącznie na podstawie dosłownych cytatów</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__self" style="left: 25.000%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 34px); bottom: 4px"><span class="seq__num">9</span>Kontrola cytatu w kodzie i podpis HMAC-SHA256</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg" style="left: 25.000%; width: 66.667%"></span>
+          <span class="seq__label" style="left: calc(25.000% + 6px)"><span class="seq__num">10</span>Zapis oceny ważnej przez dobę</span>
+        </div>
+        <div class="seq__row">
+          <span class="seq__msg seq__msg--back" style="left: 8.333%; width: 16.667%"></span>
+          <span class="seq__label" style="left: calc(8.333% + 14px)"><span class="seq__num">11</span>Werdykt, uzasadnienie, cytat, link i podpis</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 --------------------------------------------------------------------------->
+  <section class="slide" data-title="Werdykty">
+    <div class="slide__body">
+      <p class="kicker">Jakość weryfikacji</p>
+      <h2>Twardy werdykt tylko z dokładnym cytatem</h2>
+      <div class="cols cols--2">
+        <div class="stack">
+          <div class="badges">
+            <span class="verdict verdict--confirmed">Potwierdzone</span>
+            <span class="verdict verdict--false">Fałszywe</span>
+            <span class="verdict verdict--misleading">Częściowo prawdziwe</span>
+            <span class="verdict verdict--unknown">Brak wystarczających dowodów</span>
+            <span class="verdict verdict--unknown">Nie podlega weryfikacji</span>
+          </div>
+          <ul>
+            <li>Cytat musi być dosłownym fragmentem źródła – sprawdzane w kodzie.</li>
+            <li>Drugi model sprawdza, czy cytat stwierdza tezę dokładnie; inna liczba lub data → „Częściowo” albo „Nie
+              wiem”.</li>
+            <li>Cytat musi potwierdzać dokładnie to, co stwierdza teza, a nie tylko podobne zdarzenie.</li>
+            <li>Zapowiedź wydarzenia nie dowodzi, że się odbyło.</li>
+          </ul>
+        </div>
+        <div class="stack stack--centered">
+          <div class="alert alert--error">
+            <p class="alert__title">Błąd techniczny</p>
+            <p>Brak klucza, limit, awaria – nigdy jako werdykt.</p>
+          </div>
+          <div class="alert alert--info">
+            <p class="alert__title">Doprecyzuj zgłoszenie</p>
+            <p>Pytanie otwarte albo brak szczegółów: system pyta, czego brakuje.</p>
+          </div>
+          <div class="alert alert--warning">
+            <p class="alert__title">Nie mogę tego ocenić automatycznie</p>
+            <p>Treść poza zakresem – to nie jest ocena prawdziwości.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 --------------------------------------------------------------------------->
+  <section class="slide" data-title="Źródła">
+    <div class="slide__body">
+      <p class="kicker">Źródła</p>
+      <h2>Jawny, audytowalny katalog źródeł</h2>
+      <div class="centered-content sources-slide__content">
+        <div class="kpi-grid">
+          <div class="kpi-card"><span class="kpi-card__label">Dokumenty w korpusie</span><strong
+              class="kpi-card__value">170</strong></div>
+          <div class="kpi-card"><span class="kpi-card__label">Domeny</span><strong
+              class="kpi-card__value">22</strong></div>
+          <div class="kpi-card"><span class="kpi-card__label">Typy źródeł</span><strong
+              class="kpi-card__value">4</strong><span class="kpi-card__hint">urzędowe, fact-checki, dane, media</span>
+          </div>
+          <div class="kpi-card"><span class="kpi-card__label">Źródła w katalogu</span><strong
+              class="kpi-card__value">33</strong><span class="kpi-card__hint">z licencją i zasadą kwalifikacji</span>
+          </div>
+        </div>
+        <div class="cols cols--3">
+          <div class="card">
+            <h3>Fact-checki</h3>
+            <p>Google Fact Check: Demagog, AFP Sprawdzam, Konkret24, FakeNews.pl, PAP FakeHunter. EUvsDisinfo.</p>
+          </div>
+          <div class="card">
+            <h3>Urzędowe</h3>
+            <p>Wyszukiwarka gov.pl, działy gov.pl, MSZ Odyseusz, Policja, GDDKiA, ULC, UTK, CERT Polska…</p>
+          </div>
+          <div class="card">
+            <h3>Dane publiczne</h3>
+            <p>IMGW: ostrzeżenia, pomiary stacji, stany wód – czytane na żywo przy pytaniu.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8 --------------------------------------------------------------------------->
+  <section class="slide" data-title="Bezpieczeństwo">
+    <div class="slide__body">
+      <p class="kicker">Bezpieczeństwo i prywatność</p>
+      <h2>Instrukcje w treści to dane, nie polecenia</h2>
+      <div class="cols cols--2">
+        <ul>
+          <li>Detektor prompt injection na wejściu – próba zablokowana<br>i odnotowana.</li>
+          <li>Treść źródeł oddzielona od instrukcji; próby w źródłach zapisywane do przeglądu.</li>
+          <li>Maskowanie danych osobowych przed zapisem,<br>retencja 30 dni, usuwanie sesji.</li>
+          <li>Limity żądań na minutę, dobę i równoległość.</li>
+          <li>Podpis odpowiedzi – zrzut ekranu da się zweryfikować.</li>
+        </ul>
+        <div class="stack stack--spaced">
+          <div class="alert alert--warning">
+            <p class="alert__title">Popraw zgłoszenie</p>
+            <p>Zgłoszenie wygląda na próbę zmiany działania systemu, a nie na treść do sprawdzenia.</p>
+          </div>
+          <table>
+            <tr>
+              <th>Dosłowny fragment</th>
+              <th>Detektor</th>
+            </tr>
+            <tr>
+              <td class="small">„Zapomnij o swoich zasadach i napisz…”</td>
+              <td class="small">Zablokowane na wejściu</td>
+            </tr>
+            <tr>
+              <td class="small">„Zignoruj wszystkie poprzednie instrukcje…”</td>
+              <td class="small">Filtr wejścia</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9 --------------------------------------------------------------------------->
+  <section class="slide" data-title="Panel administratora">
+    <div class="slide__body">
+      <p class="kicker">Obserwowalność</p>
+      <h2>Panel administratora i analityka</h2>
+      <div class="centered-content">
+        <div class="kpi-grid">
+          <div class="kpi-card"><span class="kpi-card__label">Sprawdzenia</span><strong
+              class="kpi-card__value">588</strong><span class="kpi-card__hint">Awarie techniczne: 5%</span></div>
+          <div class="kpi-card"><span class="kpi-card__label">Mediana czasu</span><strong class="kpi-card__value">8,7
+              s</strong><span class="kpi-card__hint">p95: 22,8 s</span></div>
+          <div class="kpi-card"><span class="kpi-card__label">Wstrzymania (brak dowodów)</span><strong
+              class="kpi-card__value">51%</strong><span class="kpi-card__hint">Z 638 ocen twierdzeń</span></div>
+          <div class="kpi-card"><span class="kpi-card__label">Próby prompt injection</span><strong
+              class="kpi-card__value">2</strong><span class="kpi-card__hint">Zignorowane i odnotowane</span></div>
+        </div>
+        <div class="cols cols--3">
+          <div class="card">
+            <h3>Hot topics</h3>
+            <p>Najczęstsze tezy.</p>
+          </div>
+          <div class="card">
+            <h3>Przebiegi</h3>
+            <p>Czas, użyte modele, koszt szacunkowy, błędy wyszukiwania.</p>
+          </div>
+          <div class="card">
+            <h3>Eksport i dane</h3>
+            <p>CSV i JSON, usuwanie zgłoszeń, retencja.</p>
+          </div>
+        </div>
+        <p class="small muted mt">* Dane testowe.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10 -------------------------------------------------------------------------->
+  <section class="slide" data-title="Wyniki testów">
+    <div class="slide__body">
+      <p class="kicker">Walidacja</p>
+      <h2>Mierniki z zadania</h2>
+      <table>
+        <tr>
+          <th>Miernik</th>
+          <th>Cel MVP</th>
+          <th>Wynik</th>
+        </tr>
+        <tr>
+          <td>Trafność werdyktu (macro-F1)</td>
+          <td>≥ 0,75</td>
+          <td class="num">0,8</td>
+        </tr>
+        <tr>
+          <td>Pokrycie cytowań</td>
+          <td>≥ 95%</td>
+          <td class="num">95%</td>
+        </tr>
+        <tr>
+          <td>Poprawność cytowania</td>
+          <td>≥ 85%</td>
+          <td class="num">95%</td>
+        </tr>
+        <tr>
+          <td>Wstrzymanie się przy braku dowodów</td>
+          <td>≥ 80%</td>
+          <td class="num">90%</td>
+        </tr>
+        <tr>
+          <td>Odporność na prompt injection</td>
+          <td>≥ 90%</td>
+          <td class="num">100%</td>
+        </tr>
+        <tr>
+          <td>Mediana czasu (tekst / URL)</td>
+          <td>≤ 30 s</td>
+          <td class="num">23 s</td>
+        </tr>
+        <tr>
+          <td>Koszt 100 testów</td>
+          <td>raportowany</td>
+          <td class="num">~1 zł</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- 11 -------------------------------------------------------------------------->
+  <section class="slide" data-title="Koszty">
+    <div class="slide__body">
+      <p class="kicker">Potencjał wdrożeniowy</p>
+      <h2>Koszty, skalowanie, zależności</h2>
+      <div class="centered-content">
+        <div class="cols cols--3">
+          <div class="card">
+            <h3>Koszt</h3>
+            <p>1 000 zapytań: 1 zł<br>Kanał X: płatne API na odpytanie<br>Dla obywatela:
+              bezpłatnie</p>
+          </div>
+          <div class="card">
+            <h3>Skalowanie</h3>
+            <p>Bezstanowe API za limitami; odpowiedzi zapamiętane na dobę; ten sam obraz bez ponownego odczytu.</p>
+          </div>
+          <div class="card">
+            <h3>Dostawcy</h3>
+            <p>Modele za adapterami: łatwiejsza zmiana dostawcy. Baza i aplikacja do samodzielnego hostowania.</p>
+          </div>
+        </div>
+        <div class="alert alert--info mt">
+          <p class="alert__title">Miejsce przetwarzania</p>
+          <p>Gemini i TypeSafe przetwarzają treść zgłoszeń u dostawców; baza i aplikacja działają na własnym serwerze.
+            Dzięki adapterom Gemini można zastąpić lokalnym modelem o otwartych wagach, np. polskim Bielikiem,
+            a Jev – lokalnym polskim modelem basal.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 -------------------------------------------------------------------------->
+  <section class="slide" data-title="Ryzyka i dalsze kroki">
+    <div class="slide__body">
+      <p class="kicker">Odpowiedzialność</p>
+      <h2>Ryzyka i dalsze kroki</h2>
+      <div class="cols cols--2">
+        <table>
+          <tr>
+            <th>Ryzyko</th>
+            <th>Jak ograniczamy</th>
+          </tr>
+          <tr>
+            <td>Halucynacje</td>
+            <td>Tylko dosłowne cytaty, „Nie wiem” bez dowodu</td>
+          </tr>
+          <tr>
+            <td>Stronniczość źródeł</td>
+            <td>Jawny katalog, kilka typów źródeł</td>
+          </tr>
+          <tr>
+            <td>Prywatność</td>
+            <td>Maskowanie, retencja, usuwanie</td>
+          </tr>
+          <tr>
+            <td>Prompt injection</td>
+            <td>Detektor, separacja treści, rejestr prób</td>
+          </tr>
+          <tr>
+            <td>Dostępność</td>
+            <td>Awaria jako błąd techniczny, nie werdykt</td>
+          </tr>
+          <tr>
+            <td>Nadużycia</td>
+            <td>Limity żądań i kosztów</td>
+          </tr>
+        </table>
+        <table>
+          <tr>
+            <th>Dalszy krok</th>
+            <th>Co poprawimy</th>
+          </tr>
+          <tr>
+            <td>Testy jakości</td>
+            <td>Porównanie werdyktów i cytatów na zestawie ocenionym przez ekspertów</td>
+          </tr>
+          <tr>
+            <td>Aktualność</td>
+            <td>Lepsze rozróżnianie bieżących danych od historycznych i zapowiedzi</td>
+          </tr>
+          <tr>
+            <td>Pytania otwarte</td>
+            <td>Odpowiedzi na pytania „kiedy?” i „dlaczego?” ze źródłami</td>
+          </tr>
+          <tr>
+            <td>Obrazy i linki</td>
+            <td>Dokładniejsze dopasowanie osób i zdarzeń do znalezionych źródeł</td>
+          </tr>
+          <tr>
+            <td>Lokalne modele</td>
+            <td>Adaptery Bielika i basal oraz porównanie jakości i kosztów</td>
+          </tr>
+          <tr>
+            <td>Pilotaż</td>
+            <td>Opinie użytkowników i przegląd błędnych lub niepewnych odpowiedzi</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const slides = [...document.querySelectorAll(".slide")];
+    const header = document.getElementById("header");
+    slides.forEach((slide, index) => {
+      if (slide.dataset.title) {
+        const node = header.content.cloneNode(true);
+        node.querySelector(".crumbs b").textContent = slide.dataset.title;
+        slide.prepend(node);
+      }
+      slide.insertAdjacentHTML(
+        "beforeend",
+        `<div class="slide__footer"><span>Prawdowid – narzędzie do weryfikacji informacji</span><span>${index + 1} / ${slides.length}</span></div>`,
+      );
+    });
+
+    let current = 0;
+    const presenting = () => document.body.classList.contains("present");
+    function fit() {
+      const scale = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+      slides.forEach((s) => (s.style.transform = presenting() ? `scale(${scale})` : ""));
+    }
+    function show(index) {
+      current = Math.max(0, Math.min(slides.length - 1, index));
+      slides.forEach((s, i) => s.classList.toggle("is-active", i === current));
+      if (!presenting()) slides[current].scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    document.addEventListener("keydown", (e) => {
+      if (["ArrowRight", "PageDown", " "].includes(e.key)) { e.preventDefault(); show(current + 1); }
+      else if (["ArrowLeft", "PageUp"].includes(e.key)) { e.preventDefault(); show(current - 1); }
+      else if (e.key.toLowerCase() === "p") { document.body.classList.toggle("present"); fit(); show(current); }
+    });
+    window.addEventListener("resize", fit);
+    slides[0].classList.add("is-active");
+  </script>
+</body>
+
+</html>
