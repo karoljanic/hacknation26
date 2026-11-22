@@ -74,3 +74,12 @@ def test_wikipedia_intros_follow_redirects_and_skip_missing_pages() -> None:
     articles = WikipediaClient(client=client(handler)).intros(["Grunwald 1410", "Nieistniejące"])
 
     assert [(a.title, a.intro) for a in articles] == [("Bitwa pod Grunwaldem", "Stoczona 15 lipca 1410.")]
+
+
+def test_wikipedia_retries_once_after_being_throttled(monkeypatch) -> None:
+    monkeypatch.setattr("prawdowid.adapters.sources.wikipedia.time.sleep", lambda seconds: None)
+    responses = [httpx.Response(429, headers={"retry-after": "1"}), httpx.Response(200, json={"query": {"search": [{"title": "Wisła"}]}})]
+
+    titles = WikipediaClient(client=client(lambda request: responses.pop(0))).search("Wisła")
+
+    assert titles == ["Wisła"]

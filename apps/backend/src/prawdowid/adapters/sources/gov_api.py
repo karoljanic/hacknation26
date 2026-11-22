@@ -23,7 +23,9 @@ GOV_PL_BASE = "https://www.gov.pl"
 GOV_SEARCH_URL = f"{GOV_PL_BASE}/api/data/search"
 ODYSEUSZ_BASE = "https://odyseusz.gov.pl"
 ODYSEUSZ_PROFILE_URL = f"{ODYSEUSZ_BASE}/api/v1/informacje/profile-panstw/"
-USER_AGENT = "Prawdowid/0.1 (+weryfikacja informacji)"
+# Wikimedia (and polite API use generally) requires a client name with a
+# contact; generic agents get throttled with HTTP 429.
+USER_AGENT = "Prawdowid/0.1 (https://github.com/karoljanic/hacknation26; fact-checking service) httpx"
 
 
 def json_client(timeout: float) -> httpx.Client:

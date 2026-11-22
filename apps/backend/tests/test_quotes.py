@@ -34,3 +34,18 @@ def test_typographic_quotes_and_dashes_are_tolerated() -> None:
 )
 def test_anything_beyond_presentation_differences_is_rejected(quote: str) -> None:
     assert locate_quote(SOURCE, quote) is None
+
+
+def test_quote_shortened_with_an_elision_maps_to_the_full_contiguous_span() -> None:
+    text = "Droga wodna obejmuje rzekę Wisłę od ujścia Przemszy do Kanału Łączańskiego i dalej do ujścia Sanny."
+
+    span = source_span(text, "Droga wodna obejmuje rzekę Wisłę [...] do ujścia Sanny.")
+
+    assert span == text
+
+
+def test_elided_parts_out_of_order_or_too_far_apart_do_not_match() -> None:
+    text = "Pierwsze zdanie. " + "Wypełniacz. " * 60 + "Ostatnie zdanie."
+
+    assert source_span(text, "Ostatnie zdanie. … Pierwsze zdanie.") is None
+    assert source_span(text, "Pierwsze zdanie. … Ostatnie zdanie.") is None

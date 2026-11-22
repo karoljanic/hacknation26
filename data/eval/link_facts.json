@@ -1,0 +1,905 @@
+{
+ "generated_at": "2026-11-21",
+ "note": "Prawdziwe fakty z linków z links.md; oczekiwany werdykt: confirmed. volatile = dane bieżące (pogoda, ostrzeżenia), ważne tylko w dniu generowania.",
+ "cases": [
+  {
+   "id": "L01",
+   "url": "https://odyseusz.gov.pl/",
+   "claim": "MSZ poinformowało, że na 20 listopada 2026 r. we Włoszech zapowiedziano strajk generalny w sektorze publicznym i prywatnym.",
+   "evidence_quote": "W dniu 20 listopada na terenie całego kraju zapowiedziano strajk generalny w sektorze publicznym i prywatnym. Mogą występować utrudnienia w transporcie drogowym",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": false
+  },
+  {
+   "id": "L02",
+   "url": "https://odyseusz.gov.pl/",
+   "claim": "Według MSZ 31 października 2026 r. w 23 miastach Niemiec planowano demonstracje inicjatywy „Gen Z regelt”.",
+   "evidence_quote": "W sobotę 31 października 2026 r. w 23 miastach planowane są demonstracje organizowane przez inicjatywę „Gen Z regelt”. Służby bezpieczeństwa ostrzegają przed mo",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": false
+  },
+  {
+   "id": "L03",
+   "url": "https://www.gov.pl/web/gov/ostrzezenia",
+   "claim": "IMGW wydał ostrzeżenie meteorologiczne 1. stopnia przed oblodzeniem, obowiązujące od 2026-11-22 01:00 do 2026-11-22 08:00.",
+   "evidence_quote": "Miejscami po opadach deszczu ze śniegiem i śniegu, mokre nawierzchnie dróg i chodników mogą ulegać oblodzeniu. Temperatura powietrza obniży się do -1°C, przy gruncie do -3°C.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L04",
+   "url": "https://www.gov.pl/web/gov/ostrzezenia",
+   "claim": "Według ostrzeżenia IMGW przed oblodzeniem z 2026-11-21 temperatura powietrza obniży się do -1°C, a przy gruncie do -3°C.",
+   "evidence_quote": "Miejscami po opadach deszczu ze śniegiem i śniegu, mokre nawierzchnie dróg i chodników mogą ulegać oblodzeniu. Temperatura powietrza obniży się do -1°C, przy gruncie do -3°C.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L05",
+   "url": "https://www.gov.pl/web/gov/ostrzezenia#/_/mazowieckie/wszystkie",
+   "claim": "IMGW wydał ostrzeżenie meteorologiczne 1. stopnia przed oblodzeniem, obowiązujące od 2026-11-22 01:00 do 2026-11-22 08:00.",
+   "evidence_quote": "Miejscami po opadach deszczu ze śniegiem i śniegu, mokre nawierzchnie dróg i chodników mogą ulegać oblodzeniu. Temperatura powietrza obniży się do -1°C, przy gruncie do -3°C.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L06",
+   "url": "https://www.gov.pl/web/gov/ostrzezenia#/_/mazowieckie/wszystkie",
+   "claim": "Według ostrzeżenia IMGW przed oblodzeniem z 2026-11-21 temperatura powietrza obniży się do -1°C, a przy gruncie do -3°C.",
+   "evidence_quote": "Miejscami po opadach deszczu ze śniegiem i śniegu, mokre nawierzchnie dróg i chodników mogą ulegać oblodzeniu. Temperatura powietrza obniży się do -1°C, przy gruncie do -3°C.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L07",
+   "url": "https://www.gov.pl/web/mswia/regionalny-system-ostrzegania",
+   "claim": "W marcu 2018 roku udostępniono nową wersję aplikacji mobilnej Regionalnego Systemu Ostrzegania (RSO).",
+   "evidence_quote": "W marcu 2018 r. udostępniono nową wersję aplikacji. Od połowy lutego 2019 r. nie jest możliwe pobranie starej wersji aplikacji.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L08",
+   "url": "https://www.gov.pl/web/mswia/regionalny-system-ostrzegania",
+   "claim": "W ramach telegazety komunikaty Regionalnego Systemu Ostrzegania w programach ogólnopolskich są publikowane od strony 190, a w programach regionalnych od strony 430.",
+   "evidence_quote": "w telegazecie (programy ogólnopolskie od str. 190, programy regionalne od str. 430), w postaci napisów dla niesłyszących w programach regionalnych oraz, w przypadku poważnego zagrożenia, ogólnopolskich",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L09",
+   "url": "https://www.gov.pl/web/rcb/raport-dobowy3",
+   "claim": "W okresie od 1 października do 21 listopada 2026 roku z powodu zatrucia tlenkiem węgla zmarło w Polsce 8 osób.",
+   "evidence_quote": "Od 1 października 8 osób zmarło w wyniku zatrucia tlenkiem węgla.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L10",
+   "url": "https://www.gov.pl/web/rcb/raport-dobowy3",
+   "claim": "Premier Donald Tusk podpisał zarządzenia przedłużające obowiązywanie stopni alarmowych CHARLIE, BRAVO-CRP i BRAVO do 30 listopada 2026 roku.",
+   "evidence_quote": "Premier Donald Tusk podpisał zarządzenia, które do 30 listopada 2026 roku przedłużają obowiązywanie stopni alarmowych.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L11",
+   "url": "https://www.gov.pl/web/kgpsp/aktualnosci",
+   "claim": "AplikacjaPaństwowej Straży Pożarnej o nazwie Gdzie się ukryć PL jest dostępna do pobrania w sklepach App Store i Google Play.",
+   "evidence_quote": "Aplikacja „Gdzie się ukryć PL” Państwowej Straży Pożarnej jest już dostępna do pobrania w sklepach App Store i Google Play.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L12",
+   "url": "https://www.gov.pl/web/kgpsp/aktualnosci",
+   "claim": "Aplikacja Gdzie się ukryć PL zawiera ponad 88 tysięcy punktów schronienia przygotowanych dla 24 milionów osób.",
+   "evidence_quote": "Bezpłatne narzędzie, zawierające ponad 88 tys. punktów schronienia dla 24 mln osób, pomaga szybko znaleźć najbliższy taki punkt i prowadzi do niego",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L13",
+   "url": "https://policja.pl/pol/aktualnosci",
+   "claim": "W dniach 18–20 listopada 2026 roku w Żyrardowie odbyła się ogólnopolska odprawa funkcjonariuszy komórek właściwych w sprawach sztabowych Policji.",
+   "evidence_quote": "odprawy funkcjonariuszy komórek właściwych w sprawach sztabowych komend wojewódzkich i Komendy Stołecznej Policji, która odbywa się w dniach 18–20 listopada br. w Żyrardowie.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L14",
+   "url": "https://policja.pl/pol/aktualnosci",
+   "claim": "19 listopada 2026 roku w hali sportowej Akademickiego Centrum Sportowo-Dydaktycznego Politechniki Łódzkiej odbył się XIX finał wojewódzki konkursu w ramach Policyjnej Akademii Bezpieczeństwa.",
+   "evidence_quote": "19 listopada 2026 roku w hali sportowej Akademickiego Centrum Sportowo-Dydaktycznego Politechniki Łódzkiej „Zatoka Sportu” w Łodzi odbył się XIX finał wojewódzki „Konkursu sprawności fizycznej oraz wiedzy o bezpieczeństwie” realizowany w ramach działań profilaktycznych pn. „Policyjna Akademia Bezpieczeństwa”.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L15",
+   "url": "https://mazowiecka.policja.gov.pl/ra/aktualnosci/aktualnosci",
+   "claim": "Podkomisarz Krzysztof Grędziński z Komendy Powiatowej Policji w Mławie zajął drugie miejsce w finale VI Ogólnopolskiego Turnieju Służby Dyżurnej, który odbył się w dniach 18-20 listopada 2026 roku w Szkole Policji w Katowicach.",
+   "evidence_quote": "Podkomisarz Krzysztof Grędziński zajął drugie miejsce w finale VI Ogólnopolskiego Turnieju Służby Dyżurnej, który odbył się w dniach 18-20 listopada w Szkole Policji w Katowicach.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L16",
+   "url": "https://mazowiecka.policja.gov.pl/ra/aktualnosci/aktualnosci",
+   "claim": "83-letnia mieszkanka powiatu przysuskiego straciła 35 tysięcy złotych po tym, jak przekazała pieniądze nieznanemu mężczyźnie, wierząc oszustce podającej się za jej córkę.",
+   "evidence_quote": "83-letnia mieszkanka powiatu przysuskiego przekazała nieznanemu mężczyźnie 35 tysięcy złotych. Kobieta uwierzyła, że jej córka spowodowała wypadek i potrzebne są pieniądze, aby uniknęła odpowiedzialności karnej.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L17",
+   "url": "https://www.gov.pl/web/obrona-narodowa/aktualnosci5",
+   "claim": "Polska zadeklarowała poparcie dla utworzenia Międzynarodowego Centrum Sztucznej Inteligencji na rzecz Obronności w Rennes.",
+   "evidence_quote": "Polska zadeklarowała poparcie dla utworzenia w Rennes Międzynarodowego Centrum Sztucznej Inteligencji na rzecz Obronności (International Centre for Artificial Intelligence in Defence, ICAID) oraz wolę aktywnego udziału w procesie jego tworzenia.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L18",
+   "url": "https://www.gov.pl/web/obrona-narodowa/aktualnosci5",
+   "claim": "W dniach 16–18 listopada 2026 roku płk dr Anita Podlasin reprezentowała Polskę na 66. posiedzeniu plenarnym Komitetu Szefów Wojskowych Służb Medycznych NATO w Brukseli.",
+   "evidence_quote": "W dniach 16-18 listopada br. w Brukseli odbyło się 66. posiedzenie plenarne Komitetu Szefów Wojskowych Służb Medycznych NATO (COMEDS). Polskę reprezentowała płk dr Anita Podlasin, dyrektor Departamentu Wojskowej Służby Zdrowia MON.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L19",
+   "url": "https://www.gov.pl/web/gis/ostrzezenia",
+   "claim": "Główny Inspektorat Sanitarny wydał 18.11.2026 roku ostrzeżenie publiczne dotyczące żywności z powodu stwierdzenia przekroczenia najwyższego dopuszczalnego poziomu ochratoksyny A w mielonej kawie.",
+   "evidence_quote": "18.11.2026 Ostrzeżenie publiczne dotyczące żywności: stwierdzenie przekroczenia najwyższego dopuszczalnego poziomu ochratoksyny A w mielonej kawie",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L20",
+   "url": "https://www.gov.pl/web/gis/ostrzezenia",
+   "claim": "Dnia 09.11.2026 roku ogłoszono ostrzeżenie publiczne dotyczące żywności w związku z możliwą obecnością fragmentów szkła w jednej partii puddingu proteinowego.",
+   "evidence_quote": "09.11.2026 Ostrzeżenie publiczne dotyczące żywności: możliwa obecność fragmentów szkła w jednej partii puddingu proteinowego",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L21",
+   "url": "https://www.gov.pl/web/paa/panstwowa-agencja-atomistyki",
+   "claim": "W dniu 16 listopada 2026 roku poinformowano, że Prezes Państwowej Agencji Atomistyki został zastępcą szefa międzynarodowej misji Międzynarodowej Agencji Energii Atomowej w Jordanii.",
+   "evidence_quote": "16.11.2026 Prezes PAA zastępcą szefa międzynarodowej misji MAEA w Jordanii",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L22",
+   "url": "https://www.gov.pl/web/paa/panstwowa-agencja-atomistyki",
+   "claim": "Do głównych zadań Państwowej Agencji Atomistyki należy wykonywanie czynności związanych z zapewnieniem bezpieczeństwa jądrowego oraz ochrony radiologicznej w Polsce.",
+   "evidence_quote": "Do zakresu działania Państwowej Agencji Atomistyki należy wykonywanie zadań związanych z zapewnieniem bezpieczeństwa jądrowego i ochrony radiologicznej kraju.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "url": "https://monitoring.paa.gov.pl/",
+   "skipped": "mapa w JavaScript bez publicznego API z danymi"
+  },
+  {
+   "id": "L23",
+   "url": "https://powietrze.gios.gov.pl/pjp/",
+   "claim": "W dniu 30 października 2026 roku zaplanowano prace serwisowe na Portalu Jakość Powietrza GIOŚ, z którymi wiązała się możliwa przerwa w dostępie do bieżącej informacji o jakości powietrza.",
+   "evidence_quote": "Prace serwisowe w dniu 30.10.2026 r. - możliwa przerwa w dostępie do bieżącej informacji o jakości powietrza",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L24",
+   "url": "https://powietrze.gios.gov.pl/pjp/",
+   "claim": "Rozbudowa Portalu Jakość Powietrza została dofinansowana ze środków Mechanizmu Finansowego EOG 2009-2014 w ramach Programu Operacyjnego PL03.",
+   "evidence_quote": "Rozbudowa portalu zrealizowana w ramach projektu \"Wzmocnienie systemu oceny jakości powietrza w Polsce w oparciu o doświadczenia norweskie\" w ramach Programu Operacyjnego PL03 \"Wzmocnienie monitoringu środowiska oraz działań kontrolnych\" dofinansowana ze środków Mechanizmu Finansowego EOG 2009-2014.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L25",
+   "url": "https://moje.cert.pl/komunikaty/",
+   "claim": "Zespół CERT Polska poinformował o krytycznej podatności w środowisku uruchomieniowym Java, oznaczonej identyfikatorem CVE-2026-114938.",
+   "evidence_quote": "Zespół CERT Polska ostrzega przed krytyczną podatnością w środowisku uruchomieniowym Java (JVM), oznaczoną identyfikatorem CVE-2026-114938 i nazwaną przez jej znalazców java4shell.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L26",
+   "url": "https://moje.cert.pl/komunikaty/",
+   "claim": "W serwisie CERT Polska zaobserwowano kampanię SMS-ową wyłudzającą dane, w której oszuści wykorzystują wizerunek firmy InPost.",
+   "evidence_quote": "CERT Polska obserwuje kampanię SMS wykorzystującą wizerunek firmy InPost. Oszuści rozsyłają wiadomości informujące o rzekomych problemach z doręczeniem paczki.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L27",
+   "url": "https://www.gov.pl/web/infrastruktura",
+   "claim": "Piotr Malepszak pełni funkcję Podsekretarza stanu oraz Pełnomocnika Rządu do spraw Centralnego Portu Komunikacyjnego w Ministerstwie Infrastruktury.",
+   "evidence_quote": "Piotr Malepszak Podsekretarz stanu, Pełnomocnik Rządu do spraw Centralnego Portu Komunikacyjnego",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L28",
+   "url": "https://www.gov.pl/web/infrastruktura",
+   "claim": "Stanisław Bukowiec jest Sekretarzem stanu oraz Pełnomocnikiem Rządu ds. przeciwdziałania wykluczeniu komunikacyjnemu.",
+   "evidence_quote": "Stanisław Bukowiec Sekretarz stanu, Pełnomocnik Rządu ds. przeciwdziałania wykluczeniu komunikacyjnemu",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L29",
+   "url": "https://www.gov.pl/web/infrastruktura/aktualnosci",
+   "claim": "Od 13 listopada 2026 roku kierowcy mogą korzystać z drugiego odcinka obwodnicy Morawicy i Woli Morawickiej w ciągu drogi krajowej nr 73 o długości 4,4 km.",
+   "evidence_quote": "Od 13 listopada 2026 r. kierowcy mogą już korzystać z drugiego odcinka obwodnicy Morawicy i Woli Morawickiej o długości 4,4 km.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L30",
+   "url": "https://www.gov.pl/web/infrastruktura/aktualnosci",
+   "claim": "Minister infrastruktury Dariusz Klimczak powołał z dniem 12 listopada 2026 roku Katarzynę Dobrzańską-Junco na stanowisko Sekretarza Krajowej Rady Bezpieczeństwa Ruchu Drogowego.",
+   "evidence_quote": "Minister infrastruktury Dariusz Klimczak, na podstawie art. 140d ustawy z dnia 20 czerwca 1997 r. - Prawo o ruchu drogowym, powołał z dniem 12 listopada 2026 r. Katarzynę Dobrzańską-Junco na stanowisko Sekretarza Krajowej Rady Bezpieczeństwa Ruchu Drogowego.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L31",
+   "url": "https://www.gov.pl/web/infrastruktura/prawa-pasazerow",
+   "claim": "Prawa pasażerów w transporcie drogowym określa w prawie europejskim rozporządzenie Parlamentu Europejskiego i Rady (UE) nr 181/2011 z dnia 16 lutego 2011 r.",
+   "evidence_quote": "Prawa pasażerów w transporcie drogowym określają przepisy rozporządzenia Parlamentu Europejskiego i Rady (UE) nr 181/2011 z dnia 16 lutego 2011 r.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L32",
+   "url": "https://www.gov.pl/web/infrastruktura/prawa-pasazerow",
+   "claim": "Przepisy znowelizowanej ustawy o transporcie drogowym weszły w życie 3 kwietnia 2015 r. i wprowadziły obowiązkową procedurę wyznaczania oraz dostosowania dworców do udzielania pomocy osobom niepełnosprawnym.",
+   "evidence_quote": "Przepisy znowelizowanej ustawy o transporcie drogowym, które weszły w życie 3 kwietnia 2015 r., wprowadziły obowiązkową procedurę wyznaczania i dostosowania dworców do udzielania pomocy osobom niepełnosprawnym i osobom o ograniczonej sprawności ruchowej.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L33",
+   "url": "https://www.gov.pl/web/infrastruktura/infolinia-dla-obywatela",
+   "claim": "Centralna infolinia „Informacja dla Obywatela” ma numer telefonu 222 500 115.",
+   "evidence_quote": "Infolinia centralna: tel. 222 500 115",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L34",
+   "url": "https://www.gov.pl/web/infrastruktura/infolinia-dla-obywatela",
+   "claim": "Infolinia Ministerstwa Infrastruktury ma numer telefonu 222 500 135.",
+   "evidence_quote": "Infolinia Ministerstwa Infrastruktury: tel. 222 500 135",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L35",
+   "url": "https://www.gov.pl/web/infrastruktura/dane-kontaktowe",
+   "claim": "Kancelaria Główna Ministerstwa Infrastruktury przy ul. Chałubińskiego 4/6 przyjmuje interesantów we wtorki w godzinach od 8.00 do 18.00.",
+   "evidence_quote": "Kancelaria Główna MI, przy ul. Chałubińskiego 4/6 przyjmuje interesantów: – w poniedziałek · środę · czwartek · piątek w godzinach od 9.30 do 16.00 – we wtorek w godzinach od 8.00 do 18.00",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L36",
+   "url": "https://www.gov.pl/web/infrastruktura/dane-kontaktowe",
+   "claim": "Wejście dla osób z niepełnosprawnościami do budynku Ministerstwa Infrastruktury znajduje się przy ul. Chałubińskiego 6.",
+   "evidence_quote": "Wejście dla osób z niepełnosprawnościami znajduje się przy ul. Chałubińskiego 6.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L37",
+   "url": "https://drogi.gddkia.gov.pl/informacje-drogowe",
+   "claim": "Numer telefonu do Krajowej Informacji Drogowej GDDKiA to 19 111.",
+   "evidence_quote": "Informacja drogowa 19 111 Zgłoś problem na drodze",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L38",
+   "url": "https://drogi.gddkia.gov.pl/informacje-drogowe",
+   "claim": "W dniu 21 listopada 2026 roku o godzinie 20:54 odnotowano utrudnienie na drodze nr S6 na 188.0 km.",
+   "evidence_quote": "21.11.2026 godz. 20:54 UWAGA utrudnienie - droga nr S6 - 188.0 km",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L39",
+   "url": "https://drogi.gddkia.gov.pl/mapy/mapa-informacji-drogowej",
+   "claim": "Numer telefonu do informacji drogowej GDDKiA to 19 111.",
+   "evidence_quote": "Menu Informacja drogowa 19 111 Zgłoś problem na drodze",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L40",
+   "url": "https://drogi.gddkia.gov.pl/mapy/mapa-informacji-drogowej",
+   "claim": "W dniu 21 listopada 2026 roku o godzinie 20:54 odnotowano utrudnienie na drodze nr S6 na 188.0 kilometrze.",
+   "evidence_quote": "Zgłoś problem na drodze 21.11.2026 godz. 20:54 UWAGA utrudnienie - droga nr S6 - 188.0 km",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L41",
+   "url": "https://drogi.gddkia.gov.pl/informacje-drogowe/lista-utrudnien",
+   "claim": "Na drodze krajowej nr 44 na odcinku Gliwice – Mikołów w województwie śląskim zaplanowano kierowanie ruchem przez policję od godziny 08:30 do 12:00 w dniu 27 listopada 2026 roku.",
+   "evidence_quote": "DK44 Gliwice - Mikołów śląskie Inne Kierowanie ruchem przez policję 27.11.2026 godz. 08:30 27.11.2026 godz. 12:00",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L42",
+   "url": "https://drogi.gddkia.gov.pl/informacje-drogowe/lista-utrudnien",
+   "claim": "Prace drogowe na drodze S61 między węzłem Śniadowo a węzłem Szczuczyn w województwie podlaskim zaplanowano od 21 listopada 2026 roku od godziny 08:00 do 30 listopada 2026 roku do godziny 16:30.",
+   "evidence_quote": "S61 Węzeł Śniadowo - Węzeł Szczuczyn, obie Jezdnie podlaskie Roboty drogowe 90 21.11.2026 godz. 08:00 30.11.2026 godz. 16:30",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L43",
+   "url": "https://www.gov.pl/web/gddkia/informacja-drogowa---19-111",
+   "claim": "Całodobowy numer Informacji Drogowej Generalnej Dyrekcji Dróg Krajowych i Autostrad to 19 111.",
+   "evidence_quote": "Szczegółowe informacje o warunkach drogowych panujących na drogach krajowych podawane są pod całodobowym numerem Informacji Drogowej GDDKiA 19 111.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L44",
+   "url": "https://www.gov.pl/web/gddkia/informacja-drogowa---19-111",
+   "claim": "W przypadku niektórych operatorów komórkowych połączenie z numerem 19 111 wymaga poprzedzenia go cyfrą 0.",
+   "evidence_quote": "W przypadku niektórych operatorów sieci komórkowych konieczne jest poprzedzenie numeru 19 111 cyfrą 0.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L45",
+   "url": "https://ulc.gov.pl/",
+   "claim": "W Montrealu odbyła się 43. sesja nadzwyczajna Zgromadzenia Organizacji Międzynarodowego Lotnictwa Cywilnego (ICAO).",
+   "evidence_quote": "W Montrealu odbyła się 43. sesja nadzwyczajna Zgromadzenia Organizacji Międzynarodowego Lotnictwa Cywilnego (ICAO).",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L46",
+   "url": "https://ulc.gov.pl/",
+   "claim": "Podczas VII Światowej Konferencji Lotniczej w siedzibie ICAO w Montrealu Prezes Urzędu Lotnictwa Cywilnego Julian Rotter parafował umowę o transporcie z Brazylią.",
+   "evidence_quote": "Podczas VII Światowej Konferencji Lotniczej w siedzibie Organizacji Międzynarodowego Lotnictwa Cywilnego ICAO w Montrealu, Prezes Urzędu Lotnictwa Cywilnego Julian Rotter parafował kolejną umowę o transporcie...",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L47",
+   "url": "https://ulc.gov.pl/prawa-pasazera",
+   "claim": "Urząd Lotnictwa Cywilnego publikuje w dziale Prawa Pasażera czarną listę przewoźników lotniczych.",
+   "evidence_quote": "Czarna lista przewoźników",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L48",
+   "url": "https://ulc.gov.pl/prawa-pasazera",
+   "claim": "Urząd Lotnictwa Cywilnego udostępnia przewodnik dla pasażerów niepełnosprawnych.",
+   "evidence_quote": "Przewodnik dla pasażerów niepełnosprawnych",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L49",
+   "url": "https://ulc.gov.pl/prawa-pasazera/poradnik-dla-pasazerow",
+   "claim": "Urząd Lotnictwa Cywilnego przygotował przewodnik dla pasażerów lotniczych.",
+   "evidence_quote": "przygotowanym przez Urząd Lotnictwa Cywilnego przewodnikiem dla pasażerów",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L50",
+   "url": "https://ulc.gov.pl/prawa-pasazera/poradnik-dla-pasazerow",
+   "claim": "Poradnik Urzędu Lotnictwa Cywilnego dla pasażerów zawiera listę przedmiotów zabronionych i dozwolonych w podróży lotniczej.",
+   "evidence_quote": "Lista przedmiotów zabronionych i dozwolonych",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L51",
+   "url": "https://portalpasazera.pl/",
+   "claim": "Portal Pasażera udostępnia aplikację mobilną na telefon.",
+   "evidence_quote": "Portal Pasażera Pobierz aplikację na swój telefon!",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L52",
+   "url": "https://portalpasazera.pl/",
+   "claim": "Portal Pasażera umożliwia wyszukiwanie połączeń kolejowych.",
+   "evidence_quote": "Wyszukiwanie połączeń",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L53",
+   "url": "https://utk.gov.pl/pl/pasazerowie",
+   "claim": "Urząd Transportu Kolejowego informuje pasażerów, kiedy przysługuje rekompensata za opóźniony pociąg.",
+   "evidence_quote": "Sprawdź, kiedy przysługuje rekompensata za opóźniony pociąg",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L54",
+   "url": "https://utk.gov.pl/pl/pasazerowie",
+   "claim": "Urząd Transportu Kolejowego opisuje prawa pasażera w przypadku opóźnienia pociągu.",
+   "evidence_quote": "Prawa pasażera w przypadku opóźnienia pociągu",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "manual",
+   "volatile": false
+  },
+  {
+   "id": "L55",
+   "url": "https://kgsok.pl/",
+   "claim": "W dniu 18 listopada 1918 roku Naczelnik Państwa Józef Piłsudski powołał Straż Kolejową, na której czele stanął płk Emil Rauer.",
+   "evidence_quote": "Tego dnia w 1918 roku Naczelnik Państwa Józef Piłsudski powołał Straż Kolejową, jedną z pierwszych formacji odpowiedzialnych za bezpieczeństwo odradzającej się Rzeczypospolitej. Na jej czele stanął płk Emil Rauer.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L56",
+   "url": "https://kgsok.pl/",
+   "claim": "Funkcjonariusze Straży Ochrony Kolei z Kłodzka zatrzymali 36-letniego mężczyznę, który malował sprayem napisy na budynku kolejowym na stacji Dzierżoniów Śląski.",
+   "evidence_quote": "Funkcjonariusze Straży Ochrony Kolei z Kłodzka zatrzymali 36-letniego mężczyznę, który malował sprayem napisy na elewacji budynku kolejowego należącego do Nieruchomości PKP S.A. na stacji Dzierżoniów Śląski.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L57",
+   "url": "https://www.sar.gov.pl/",
+   "claim": "Numerem alarmowym Morskiej Służby Poszukiwania i Ratownictwa jest 985.",
+   "evidence_quote": "Potrzebna pomoc? NUMER ALARMOWY ☎ 985 MRCK Gdynia MPCK Świnoujście Morskie i Brzegowe Stacje Ratownicze",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L58",
+   "url": "https://www.sar.gov.pl/",
+   "claim": "Prace związane z modernizacją jednostki „Czesław II” zakończyły się w dniu 4 lutego 2026 roku.",
+   "evidence_quote": "Zakończenie prac związanych z modernizacją jednostki „Czesław II” w dniu 04.02.2026r.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L59",
+   "url": "https://www.umgdy.gov.pl/",
+   "claim": "W dniach 6–7 października 2026 roku w Lund odbyło się spotkanie inaugurujące międzynarodowy projekt HARCCA, w którym uczestniczy Urząd Morski w Gdyni.",
+   "evidence_quote": "W dniach 6–7 października 2026 r. w szwedzkim Lund odbyło się spotkanie inaugurujące międzynarodowy projekt HARCCA",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L60",
+   "url": "https://www.umgdy.gov.pl/",
+   "claim": "Urząd Morski w Gdyni podpisał 9 października 2026 roku umowę na realizację zadania dotyczącego sztucznego zasilania brzegu morskiego w rejonie Babich Dołów.",
+   "evidence_quote": "Urząd Morski w Gdyni podpisał 9 października 2026 r. umowę na realizację zadania pn. „Sztuczne zasilanie brzegu morskiego w rejon",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L61",
+   "url": "https://www.ums.gov.pl/bezpieczenstwo-morskie/warunki-zeglugi",
+   "claim": "Komunikat 07/2026 Kapitana Portu Świnoujście został odwołany w dniu 8 lipca 2026 roku.",
+   "evidence_quote": "Komunikat 07/2026 Kapitana Portu Świnoujście - (komunikat odwołany dnia 08.07.2026)",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L62",
+   "url": "https://www.ums.gov.pl/bezpieczenstwo-morskie/warunki-zeglugi",
+   "claim": "Siedziba Urzędu Morskiego w Szczecinie mieści się przy placu Stefana Batorego 4 w Szczecinie.",
+   "evidence_quote": "Nasz adres: pl. Stefana Batorego 4 70-207 Szczecin",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L63",
+   "url": "https://www.gov.pl/web/wody-polskie/komunikaty-nawigacyjne",
+   "claim": "Śródlądowa droga wodna administrowana przez RZGW w Krakowie obejmuje rzekę Wisłę od ujścia rzeki Przemszy do połączenia z Kanałem Łączańskim wraz z tym kanałem i od tego kanału do ujścia rzeki Sanny.",
+   "evidence_quote": "RZGW w Krakowie: rzeka Wisła od ujścia rzeki Przemszy do połączenia z Kanałem Łączańskim wraz z tym kanałem i od tego kanału do ujścia rzeki Sanny (km 295+200).",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L64",
+   "url": "https://www.gov.pl/web/wody-polskie/komunikaty-nawigacyjne",
+   "claim": "Śródlądową drogą wodną administrowaną przez RZGW w Lublinie jest rzeka Bug od ujścia rzeki Muchawiec do km 42+200.",
+   "evidence_quote": "RZGW w Lublinie: rzeka Bug od ujścia rzeki Muchawiec do km 42+200.",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L65",
+   "url": "https://meteo.imgw.pl/",
+   "claim": "Według pomiaru IMGW z 2026-11-21 z godz. 21:00 temperatura powietrza w Warszawie wynosiła 4,3°C.",
+   "evidence_quote": "{\"id_stacji\": \"12375\", \"stacja\": \"Warszawa\", \"data_pomiaru\": \"2026-11-21\", \"godzina_pomiaru\": \"21\", \"temperatura\": \"4.3\", \"predkosc_wiatru\": \"3\", \"kierunek_wiatru\": \"240\", \"wilgotnosc_wzgledna\": \"81.9\", \"suma_opadu\": \"0.7\", \"cisnienie\": \"1009.1\"}",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L66",
+   "url": "https://meteo.imgw.pl/",
+   "claim": "Według pomiaru IMGW z 2026-11-21 z godz. 21:00 ciśnienie atmosferyczne w Warszawie wynosiło 1009,1 hPa.",
+   "evidence_quote": "{\"id_stacji\": \"12375\", \"stacja\": \"Warszawa\", \"data_pomiaru\": \"2026-11-21\", \"godzina_pomiaru\": \"21\", \"temperatura\": \"4.3\", \"predkosc_wiatru\": \"3\", \"kierunek_wiatru\": \"240\", \"wilgotnosc_wzgledna\": \"81.9\", \"suma_opadu\": \"0.7\", \"cisnienie\": \"1009.1\"}",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L67",
+   "url": "https://hydro.imgw.pl/",
+   "claim": "Stan wody na Wiśle na stacji Warszawa-Nadwilanówka 2026-11-21 o godz. 20:50 wynosił 168 cm.",
+   "evidence_quote": "{\"id_stacji\": \"152210040\", \"stacja\": \"Warszawa - Nadwilanówka\", \"rzeka\": \"Wisła\", \"wojewodztwo\": \"mazowieckie\", \"lon\": \"21.1081\", \"lat\": \"52.1864\", \"rok_zalozenia_stacji\": \"1967\", \"rzedna_zerawodowskazu\": \"76.805\", \"kilometr_biegu_rzeki\": \"431.57\", \"stan_alarmowy\": \"800\", \"stan_ostrzegawczy\": \"750\",",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L68",
+   "url": "https://hydro.imgw.pl/",
+   "claim": "Stan ostrzegawczy dla stacji Warszawa-Nadwilanówka na Wiśle wynosi 750 cm.",
+   "evidence_quote": "{\"id_stacji\": \"152210040\", \"stacja\": \"Warszawa - Nadwilanówka\", \"rzeka\": \"Wisła\", \"wojewodztwo\": \"mazowieckie\", \"lon\": \"21.1081\", \"lat\": \"52.1864\", \"rok_zalozenia_stacji\": \"1967\", \"rzedna_zerawodowskazu\": \"76.805\", \"kilometr_biegu_rzeki\": \"431.57\", \"stan_alarmowy\": \"800\", \"stan_ostrzegawczy\": \"750\",",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L69",
+   "url": "https://baltyk.imgw.pl/",
+   "claim": "Według pomiaru IMGW z 2026-11-21 z godz. 21:00 temperatura powietrza na Helu wynosiła 3,4°C.",
+   "evidence_quote": "{\"id_stacji\": \"12135\", \"stacja\": \"Hel\", \"data_pomiaru\": \"2026-11-21\", \"godzina_pomiaru\": \"21\", \"temperatura\": \"3.4\", \"predkosc_wiatru\": \"6\", \"kierunek_wiatru\": \"260\", \"wilgotnosc_wzgledna\": \"89.8\", \"suma_opadu\": \"0.1\", \"cisnienie\": \"1003.9\"}",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L70",
+   "url": "https://baltyk.imgw.pl/",
+   "claim": "Według pomiaru IMGW z 2026-11-21 z godz. 21:00 prędkość wiatru na Helu wynosiła 6 m/s.",
+   "evidence_quote": "{\"id_stacji\": \"12135\", \"stacja\": \"Hel\", \"data_pomiaru\": \"2026-11-21\", \"godzina_pomiaru\": \"21\", \"temperatura\": \"3.4\", \"predkosc_wiatru\": \"6\", \"kierunek_wiatru\": \"260\", \"wilgotnosc_wzgledna\": \"89.8\", \"suma_opadu\": \"0.1\", \"cisnienie\": \"1003.9\"}",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": true
+  },
+  {
+   "id": "L71",
+   "url": "https://www.gov.pl/web/rcb/strona-glowna-rzadowego-centrum-bezpieczenstwa",
+   "claim": "W dniu 19 listopada 2026 roku wydano Alert RCB dotyczący wody niezdatnej do spożycia w powiecie ząbkowickim.",
+   "evidence_quote": "19.11.2026 Alert RCB - woda niezdatna do spożycia, pow. ząbkowicki (19.11)",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L72",
+   "url": "https://www.gov.pl/web/rcb/strona-glowna-rzadowego-centrum-bezpieczenstwa",
+   "claim": "W dniu 20 listopada 2026 roku ogłoszono Alert RCB informujący o ataku z powietrza.",
+   "evidence_quote": "20.11.2026 Alert RCB - atak z powietrza (20.11)",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L73",
+   "url": "https://www.gov.pl/web/mswia",
+   "claim": "Czasowe i terytorialne zawieszenie prawa do azylu przy granicy polsko-białoruskiej zostało przedłużone o następne 60 dni.",
+   "evidence_quote": "Czasowe i terytorialne zawieszenie prawa do azylu przy granicy polsko-białoruskiej przedłużone o następne 60 dni",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L74",
+   "url": "https://www.gov.pl/web/mswia",
+   "claim": "Marcin Kierwiński pełni funkcję Ministra Spraw Wewnętrznych i Administracji.",
+   "evidence_quote": "Marcin Kierwiński Minister Spraw Wewnętrznych i Administracji",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L75",
+   "url": "https://www.gov.pl/web/dyplomacja/informacje-dla-podrozujacych",
+   "claim": "MSZ ocenia poziom zagrożenia dla podróżujących do Włoch jako poziom 1 – zwykła ostrożność.",
+   "evidence_quote": "Poziom 1 - Zwykła ostrożność",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": false
+  },
+  {
+   "id": "L76",
+   "url": "https://www.gov.pl/web/dyplomacja/informacje-dla-podrozujacych",
+   "claim": "MSZ ocenia poziom zagrożenia dla podróżujących do Niemiec jako poziom 1 – zwykła ostrożność.",
+   "evidence_quote": "Poziom 1 - Zwykła ostrożność",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "api",
+   "volatile": false
+  },
+  {
+   "id": "L77",
+   "url": "https://www.gov.pl/web/premier",
+   "claim": "Władysław Kosiniak-Kamysz pełni funkcję Wiceprezesa Rady Ministrów oraz Ministra Obrony Narodowej.",
+   "evidence_quote": "Władysław Kosiniak-Kamysz Wiceprezes Rady Ministrów, Minister Obrony Narodowej",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L78",
+   "url": "https://www.gov.pl/web/premier",
+   "claim": "Na dzień 19 listopada 2026 roku zaplanowano zaproszenie od Premiera na Warszawski Szczyt Wysokiego Szczebla w sprawie AI.",
+   "evidence_quote": "19.11.2026 Premier zaprasza na Warszawski Szczyt Wysokiego Szczebla w sprawie AI",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "url": "https://toolbox.google.com/factcheck/explorer/search/list:recent;hl=pl",
+   "skipped": "interfejs Google w JavaScript; to samo źródło testują fakty z dokumentacji API"
+  },
+  {
+   "id": "L79",
+   "url": "https://developers.google.com/fact-check/tools/api/reference/rest?hl=pl",
+   "claim": "Adres usługi Fact Check Tools API dla dokumentu Discovery to https://factchecktools.googleapis.com/$discovery/rest?version=v1alpha1.",
+   "evidence_quote": "Ta usługa dostarcza następujący dokument opisujący interfejs API: https://factchecktools.googleapis.com/$discovery/rest?version=v1alpha1",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L80",
+   "url": "https://developers.google.com/fact-check/tools/api/reference/rest?hl=pl",
+   "claim": "Podstawowy punkt końcowy usługi Fact Check Tools API to https://factchecktools.googleapis.com.",
+   "evidence_quote": "Ta usługa ma następujący punkt końcowy usługi, a wszystkie poniższe identyfikatory URI są zależne od tego punktu końcowego: https://factchecktools.googleapis.com",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  },
+  {
+   "id": "L81",
+   "url": "https://euvsdisinfo.eu/public-docs/How_to_grab_all_Articles_and_Cases_from_disinfo.pdf",
+   "claim": "Serwer MCP serwisu EUvsDisinfo znajduje się pod adresem https://euvsdisinfo-mcp-server.vercel.app/mcp.",
+   "evidence_quote": "Our\n \nMCP\n \nserver\n \nis\n \nhttps://euvsdisinfo-mcp-server.vercel.app/mcp",
+   "expected": [
+    "confirmed"
+   ],
+   "origin": "page+gemini",
+   "volatile": false
+  }
+ ]
+}

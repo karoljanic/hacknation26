@@ -1,3 +1,4 @@
+from datetime import date
 import json
 from unittest.mock import Mock
 
@@ -166,3 +167,23 @@ def test_malformed_search_hints_from_the_model_are_cleaned_not_fatal() -> None:
 )
 def test_open_questions_are_recognised_by_their_interrogative_word(text: str, expected: bool) -> None:
     assert is_open_question(text) is expected
+
+
+def test_quote_differing_only_in_typography_is_stored_as_the_input_span() -> None:
+    llm = Mock(spec=LLMAdapter)
+    llm.generate_structured.return_value = extraction_result([claim(quote="Czy zakaz obowiązuje jutro?")])
+    segment = InputSegment(id="s1", text="Czy zakaz\u00a0obowiązuje\njutro?", origin="question")
+
+    result = ClaimExtractor(llm).extract([segment])
+
+    assert result.data.claims[0].references[0].quote == "Czy zakaz\u00a0obowiązuje\njutro?"
+
+
+def test_extraction_prompt_states_today_for_resolving_relative_dates() -> None:
+    llm = Mock(spec=LLMAdapter)
+    llm.generate_structured.return_value = extraction_result([claim()])
+    segment = InputSegment(id="s1", text="Czy zakaz obowiązuje jutro?", origin="question")
+
+    ClaimExtractor(llm, today=lambda: date(2026, 11, 21)).extract([segment])
+
+    assert json.loads(llm.generate_structured.call_args.args[0])["today"] == "2026-11-21"

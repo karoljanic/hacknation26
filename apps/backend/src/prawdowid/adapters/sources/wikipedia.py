@@ -4,6 +4,7 @@ general knowledge (history, geography, science)."""
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ import httpx
 from prawdowid.adapters.sources.gov_api import json_client
 
 MAX_INTRO_CHARS = 4000
+MAX_RETRY_WAIT_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,11 @@ class WikipediaClient:
         self.close()
 
     def _get(self, params: dict[str, str | int]) -> dict:
-        response = self._client.get(self.api_url, params={**params, "format": "json", "formatversion": 2})
+        query = {**params, "format": "json", "formatversion": 2}
+        response = self._client.get(self.api_url, params=query)
+        if response.status_code == 429:  # throttled: one short, bounded retry
+            time.sleep(min(float(response.headers.get("retry-after") or 1), MAX_RETRY_WAIT_SECONDS))
+            response = self._client.get(self.api_url, params=query)
         response.raise_for_status()
         return response.json()
 

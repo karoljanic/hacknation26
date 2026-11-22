@@ -71,6 +71,9 @@ COLLECTORS: dict[str, Callable[[], AbstractContextManager[Collector]]] = {
     "euvsdisinfo": _euvsdisinfo,
     "google_fact_check_live": _google_fact_check_live,
     "live_only": _live_only,
+    # Read live per claim by services.gov_connectors; no batch sweep (yet).
+    "official_page": _live_only,
+    "imgw": _live_only,
 }
 
 

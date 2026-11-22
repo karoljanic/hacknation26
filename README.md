@@ -598,6 +598,39 @@ Ocena fact-checkera jest przechowywana dosłownie w `document.metadata`
 przebieg ze statusem `skipped`, awaria źródła — `failed`; żaden z nich nie jest
 traktowany jako „brak dokumentów”.
 
+### Źródła czytane na żywo przy sprawdzaniu
+
+Przy każdej tezie model decyzyjny (Jev) wybiera z katalogu maksymalnie 3
+źródła oficjalne, które realnie dotyczą tematu, i czyta ich bieżącą treść:
+
+| Kolektor | Źródła | Jak czytane |
+| --- | --- | --- |
+| `gov_pl` | sekcje gov.pl (RCB, MSWiA, MON, GIS, PAA, Infrastruktura, KG PSP, Wody Polskie, GDDKiA, KPRM) | parser gov.pl, najnowsze artykuły z list |
+| `official_page` | Policja (KGP, mazowiecka), GDDKiA – utrudnienia, ULC, UTK, Portal Pasażera, SOK, SAR, urzędy morskie w Gdyni i Szczecinie, GIOŚ, CERT Polska | strona pobierana tylko z domeny z katalogu, bez ukrytego tekstu |
+| `imgw` | IMGW-PIB: ostrzeżenia meteo i hydro, pomiary synop i hydro | otwarte API |
+
+Lista aktualności czy zrzut API to dziesiątki tysięcy znaków o innych sprawach,
+więc do oceny trafiają tylko dokumenty i fragmenty mające najwięcej słów
+wspólnych z tezą i jej frazami wyszukiwania (`services/relevance.py`).
+Niezależnie od tego zawsze odpytywane są Google Fact Check, EUvsDisinfo,
+wyszukiwarka gov.pl, Odyseusz (MSZ, dla krajów z tezy) i Wikipedia.
+
+### Test na prawdziwych faktach
+
+[`data/eval/link_facts.json`](data/eval/link_facts.json) zawiera po 2 prawdziwe
+fakty z każdego linku z `links.md` (z dosłownym cytatem ze strony lub z API;
+oczekiwany werdykt `confirmed`). Uruchomienie przeciw działającemu API:
+
+```bash
+python apps/backend/examples/run_link_eval.py --api http://127.0.0.1:8001 --out /tmp/link_eval.json
+```
+
+Wynik `abstain` (brak werdyktu) to bezpieczne wstrzymanie się, `wrong`
+(fałsz/wprowadza w błąd) to błąd. Przypadki `volatile` (pogoda, ostrzeżenia) są
+ważne tylko w dniu wygenerowania. Ostatni przebieg (21.11.2026): 64 z 81
+potwierdzone, 16 bez werdyktu, 1 „fałsz” (IMGW skorygowało pomiar po
+wygenerowaniu testu), mediana 12,5 s.
+
 ```bash
 cd apps/backend
 python -m prawdowid.ingestion sync-catalog

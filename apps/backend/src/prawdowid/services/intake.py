@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from prawdowid.ai.adapters.embedding import EmbeddingAdapter
-from prawdowid.ai.adapters.llm import StructuredResult
+from prawdowid.ai.adapters.llm import ContentBlocked, StructuredResult
 from prawdowid.domain.claims import ClaimExtraction
 from prawdowid.domain.enums import (
     Channel,
@@ -35,6 +35,11 @@ from prawdowid.services.preparation import InputPreparer, NoExtractableContentEr
 from prawdowid.services.usage import estimate_cost, model_prices, usage_entry
 
 PIPELINE_VERSION = "intake-0.1"
+CONTENT_BLOCKED_MESSAGE = (
+    "Nie mogę automatycznie przeanalizować tej treści: model językowy odmówił jej przetworzenia "
+    "(np. z powodu drastycznych szczegółów). To nie jest ocena prawdziwości ani błąd techniczny. "
+    "Sprawdź komunikaty Policji, prokuratury lub serwisów fact-checkingowych."
+)
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +83,9 @@ class IntakeResult:
     message: str | None = None  # user-facing reason for a non-OK status
     # Redacted submission text the claims came from (context for later steps).
     input_text: str = ""
+    # The link the user submitted and its (redacted) page text, if any.
+    source_url: str | None = None
+    source_text: str = ""
 
 
 class ClaimIntake:
@@ -177,6 +185,9 @@ class ClaimIntake:
                                  extraction.model_version,
                                  extraction.input_tokens, extraction.output_tokens))
             embeddings = self._embed(extraction, models)
+        except ContentBlocked as exc:  # a refusal, not an outage: retrying will not help
+            return self._close(submission_id, run_id, started, models, RunStatus.OUT_OF_SCOPE,
+                               CONTENT_BLOCKED_MESSAGE, error=str(exc), redacted_text=redacted_text)
         except NoExtractableContentError as exc:
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
                                "Nie udało się odczytać treści do sprawdzenia.", error=str(exc),
@@ -196,15 +207,24 @@ class ClaimIntake:
                                error=f"{type(exc).__name__}: {exc}", redacted_text=redacted_text)
 
         if not extraction.data.claims:
+            message = (
+                "Ta strona nie zawiera twierdzeń do sprawdzenia (np. to spis treści lub strona startowa). "
+                "Wklej link ponownie i zadaj pytanie o konkretną informację z tej strony."
+                if url is not None
+                else "Nie znaleziono twierdzeń do sprawdzenia. Opisz, co dokładnie chcesz zweryfikować."
+            )
             return self._close(submission_id, run_id, started, models, RunStatus.NEEDS_CLARIFICATION,
-                               "Nie znaleziono twierdzeń do sprawdzenia. Opisz, co dokładnie chcesz zweryfikować.",
-                               redacted_text=redacted_text)
+                               message, redacted_text=redacted_text)
 
         stored = self._store_claims(submission_id, extraction, embeddings)
         self._close(submission_id, run_id, started, models, RunStatus.OK, None,
                     redacted_text=redacted_text, finish=not self.keep_run_open)
         input_text = "\n\n".join(segment.text for segment in prepared.segments)
-        return IntakeResult(submission_id, run_id, RunStatus.OK, stored, input_text=input_text)
+        source_text = "\n".join(segment.text for segment in prepared.segments if segment.origin == "article")
+        return IntakeResult(
+            submission_id, run_id, RunStatus.OK, stored, input_text=input_text,
+            source_url=url, source_text=source_text,
+        )
 
     @staticmethod
     def _redact_segments(prepared: PreparedInput) -> PreparedInput:

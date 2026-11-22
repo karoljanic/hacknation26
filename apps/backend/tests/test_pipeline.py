@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from prawdowid.ai.adapters.llm import ContentBlocked
 from prawdowid.domain.enums import Channel, ClaimKind, RunStatus, SubmissionClaimRelation
 from prawdowid.domain.evidence import (
     AssessmentReasons,
@@ -258,6 +259,29 @@ def test_open_question_next_to_a_checkable_claim_is_answered_deterministically()
     assert [claim.id for claim in evidence_search.search.call_args.args[0]] == [str(claim_id)]
     verdicts = {outcome.text: outcome.assessment.verdict for outcome in result.claims}
     assert verdicts == {"Dlaczego to zrobili?": "unverifiable", "Rząd podniósł VAT.": "insufficient_evidence"}
+
+
+def test_model_refusing_the_assessment_is_out_of_scope_not_a_technical_failure() -> None:
+    run_id, claim_id = uuid.uuid4(), uuid.uuid4()
+    intake = Mock()
+    intake.submit_text.return_value = intake_result(RunStatus.OK, [stored(claim_id, "Nożownik zabił trzy osoby.")], run_id=run_id)
+    item = evidence_item()
+    evidence_search = Mock()
+    evidence_search.search = AsyncMock(
+        return_value=EvidenceSearchResult(claims=[ClaimEvidence(claim_id=str(claim_id), items=[item])], skipped_opinion_ids=[])
+    )
+    sublinks = Mock()
+    sublinks.select.return_value = [EvidenceForAssessment(item=item, text=item.snippet, fully_fetched=False)]
+    assessment = Mock()
+    assessment.assess.side_effect = ContentBlocked("blocked")
+    run = VerificationRun(id=run_id, status=RunStatus.RUNNING, pipeline_version="t")
+    pipeline = make_pipeline(run=run, intake=intake, evidence_search=evidence_search, sublinks=sublinks, assessment=assessment)
+
+    result = asyncio.run(pipeline.run_text("Nożownik zabił trzy osoby.", channel=Channel.WEB))
+
+    assert result.status == RunStatus.OUT_OF_SCOPE
+    assert "nie jest ocena prawdziwości" in result.message
+    assert run.status == RunStatus.OUT_OF_SCOPE
 
 
 def test_claim_with_evidence_goes_through_sublinks_and_assessment() -> None:

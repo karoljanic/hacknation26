@@ -2,8 +2,40 @@ from google import genai
 from google.genai import types
 from pydantic import ValidationError
 
-from prawdowid.ai.adapters.llm import GenerationResult, ResultT, StructuredResult
+from prawdowid.ai.adapters.llm import ContentBlocked, GenerationResult, ResultT, StructuredResult
 from prawdowid.ai.adapters.media import Media
+
+
+# Fact-checking is about violence, war, crime and hate speech by nature: block
+# only content rated highly likely harmful. Prohibited content (e.g. child
+# abuse) stays blocked by the provider regardless of these settings.
+SAFETY_SETTINGS = [
+    types.SafetySetting(category=category, threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH)
+    for category in (
+        types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+        types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    )
+]
+_BLOCKING_FINISH_REASONS = {
+    types.FinishReason.SAFETY,
+    types.FinishReason.BLOCKLIST,
+    types.FinishReason.PROHIBITED_CONTENT,
+    types.FinishReason.SPII,
+    types.FinishReason.IMAGE_SAFETY,
+    types.FinishReason.IMAGE_PROHIBITED_CONTENT,
+}
+
+
+def _raise_if_blocked(response: types.GenerateContentResponse) -> None:
+    feedback = getattr(response, "prompt_feedback", None)
+    if feedback is not None and feedback.block_reason is not None:
+        raise ContentBlocked(f"Gemini blocked the input: {feedback.block_reason}")
+    candidates = getattr(response, "candidates", None)
+    candidate = candidates[0] if candidates else None
+    if candidate is not None and candidate.finish_reason in _BLOCKING_FINISH_REASONS:
+        raise ContentBlocked(f"Gemini blocked the answer: {candidate.finish_reason}")
 
 
 class GeminiAdapter:
@@ -25,12 +57,14 @@ class GeminiAdapter:
         config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())] if search else None,
             thinking_config=self._thinking(),
+            safety_settings=SAFETY_SETTINGS,
         )
         response = self.client.models.generate_content(
             model=self.model,
             contents=prompt,
             config=config,
         )
+        _raise_if_blocked(response)
         text = response.text
         if not text:
             raise RuntimeError("Gemini returned no text")
@@ -72,8 +106,10 @@ class GeminiAdapter:
                 response_mime_type="application/json",
                 response_json_schema=schema.model_json_schema(),
                 thinking_config=self._thinking(),
+                safety_settings=SAFETY_SETTINGS,
             ),
         )
+        _raise_if_blocked(response)
         text = response.text
         if not text:
             raise RuntimeError("Gemini returned no structured output")

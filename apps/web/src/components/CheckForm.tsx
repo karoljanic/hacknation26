@@ -57,7 +57,7 @@ const OPTIONS: { value: InputType; label: string; hint: string }[] = [
 const VERDICT_LABEL: Record<Verdict, string> = {
   confirmed: "Potwierdzone",
   false: "Fałszywe",
-  misleading: "Wprowadzające w błąd",
+  misleading: "Częściowo prawdziwe / wprowadzające w błąd",
   insufficient_evidence: "Brak wystarczających dowodów",
   unverifiable: "Nie podlega weryfikacji",
 };
@@ -86,6 +86,7 @@ type State =
   | { kind: "idle" }
   | { kind: "loading" }
   | { kind: "needs-clarification"; message: string | null }
+  | { kind: "out-of-scope"; message: string | null }
   | { kind: "busy"; message: string; retryAfter: number | null }
   | { kind: "invalid"; message: string }
   | { kind: "error"; message: string }
@@ -224,6 +225,9 @@ export function CheckForm() {
           break;
         case "needs_clarification":
           setState({ kind: "needs-clarification", message: payload.message ?? null });
+          break;
+        case "out_of_scope":
+          setState({ kind: "out-of-scope", message: payload.message ?? null });
           break;
         case "tech_failure":
         default:
@@ -433,6 +437,13 @@ function Result({ state }: { state: State }) {
           <p className="alert__title">Limit zgłoszeń</p>
           <p>{state.message}</p>
           {state.retryAfter !== null && <p>Spróbuj ponownie za około {state.retryAfter} s.</p>}
+        </div>
+      );
+    case "out-of-scope":
+      return (
+        <div className="alert alert--warning">
+          <p className="alert__title">Nie mogę tego ocenić automatycznie</p>
+          <p>{state.message ?? "Tej treści nie da się przeanalizować automatycznie. To nie jest ocena prawdziwości."}</p>
         </div>
       );
     case "needs-clarification":

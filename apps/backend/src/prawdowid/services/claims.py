@@ -1,8 +1,11 @@
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from datetime import date
 
 from prawdowid.ai.adapters.llm import LLMAdapter, StructuredResult
 from prawdowid.domain.claims import ClaimExtraction, InputSegment
+from prawdowid.domain.quotes import source_span
+from prawdowid.services.clock import today_in_poland
 
 EXTRACTION_INSTRUCTIONS = """
 Extract atomic claims and verification questions from the supplied input segments.
@@ -12,9 +15,22 @@ dates, scope, attribution and location. Do not add facts or issue truth verdicts
 Separate factual_claim, verification_question and opinion.
 Questions and their presuppositions are not established facts: keep them as
 verification_question. Split compound statements without losing their context.
-Attach each item to original segment IDs with exact, non-empty verbatim quotes.
-Mark missing context and unresolved relative dates (e.g. tomorrow); never assume
-that the date of processing is the publication date. Do not invent missing names.
+Attach each item to original segment IDs with exact, non-empty verbatim quotes:
+one contiguous passage copied character for character, never shortened with
+"[...]" or "…".
+Relative dates ("dziś", "jutro", "wczoraj", "w tym tygodniu", "teraz"): in the
+asker's own question or statement addressed to us, they mean the "today" date
+given with the input; resolve them and write the absolute date into the claim
+text and search_queries (e.g. "Czy dziś spadły rakiety?" with today 2026-11-21
+-> "Czy 21 listopada 2026 r. spadły rakiety?"). In quoted or forwarded material
+(a message someone sent, an article, a screenshot), they refer to its unknown
+writing date: keep them and list them as ambiguities; never assume that the
+date of processing is the publication date there. This holds even when the
+asker asks about that material now: in "Kolega napisał: jutro będzie atak. Czy
+to prawda?" the "jutro" is the friend's, so keep it unresolved. Do not extract
+claims about the act of forwarding itself (who wrote what to the asker);
+extract what the forwarded material asserts. Mark other missing context.
+Do not invent missing names.
 Use unique claim IDs. Return an empty claims list only when there are no relevant
 claims, questions or opinions. Preserve distinct dates, places and quantities.
 For each factual_claim and verification_question also give:
@@ -55,8 +71,9 @@ def is_open_question(text: str) -> bool:
 
 
 class ClaimExtractor:
-    def __init__(self, llm: LLMAdapter) -> None:
+    def __init__(self, llm: LLMAdapter, *, today: Callable[[], date] = today_in_poland) -> None:
         self.llm = llm
+        self.today = today
 
     def extract(self, segments: Sequence[InputSegment]) -> StructuredResult[ClaimExtraction]:
         if not segments:
@@ -66,7 +83,10 @@ class ClaimExtractor:
             raise ValueError("Input segment IDs must be unique")
         result = self.llm.generate_structured(
             json.dumps(
-                {"segments": [segment.model_dump(mode="json") for segment in segments]},
+                {
+                    "today": self.today().isoformat(),
+                    "segments": [segment.model_dump(mode="json") for segment in segments],
+                },
                 ensure_ascii=False,
             ),
             ClaimExtraction,
@@ -80,6 +100,9 @@ class ClaimExtractor:
                 segment = by_id.get(reference.segment_id)
                 if segment is None:
                     raise RuntimeError("Model referenced an unknown input segment")
-                if not reference.quote.strip() or reference.quote not in segment.text:
+                # Whitespace/typography-tolerant; the stored quote is the input's own span.
+                verbatim = source_span(segment.text, reference.quote)
+                if verbatim is None:
                     raise RuntimeError("Model returned a quote absent from its input segment")
+                reference.quote = verbatim
         return result

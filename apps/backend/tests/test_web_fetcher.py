@@ -60,6 +60,7 @@ def test_https_keeps_original_hostname_for_tls(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(ssl, "create_default_context", Mock(return_value=context))
     PublicWebFetcher().fetch("https://news.example/")
     context.wrap_socket.assert_called_once_with(wire, server_hostname="news.example")
+    assert b"Host: news.example\r\n" in wire.sent  # not "news.example:443": some servers reject it
     assert wire.closed
 
 

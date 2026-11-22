@@ -15,12 +15,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from prawdowid.ai.adapters.llm import ContentBlocked
 from prawdowid.domain.enums import RunStatus
 from prawdowid.domain.evidence import (
     ClaimAssessmentOutput,
     ClaimEvidenceBundle,
     ClaimForVerification,
     EvidenceForAssessment,
+    EvidenceSearchResult,
     InjectionNote,
 )
 from prawdowid.domain.preparation import PreparedInput
@@ -35,8 +37,10 @@ from prawdowid.services.assessment import (
 )
 from prawdowid.services.claim_selection import ClaimSelection, ClaimSelector
 from prawdowid.services.evidence_search import EvidenceSearchOrchestrator
-from prawdowid.services.intake import ClaimIntake, IntakeResult, StoredClaim
+from prawdowid.services.intake import CONTENT_BLOCKED_MESSAGE, ClaimIntake, IntakeResult, StoredClaim
+from prawdowid.services.relevance import claim_terms
 from prawdowid.services.sublinks import SublinkSelector
+from prawdowid.services.submitted_page import SubmittedPageEvidence
 from prawdowid.services.usage import UsageMeter, estimate_cost, model_prices, usage_entry
 
 ASSESSMENT_FAILED_MESSAGE = "Błąd techniczny podczas oceny zgłoszenia. Spróbuj ponownie później."
@@ -80,6 +84,7 @@ class VerificationPipeline:
         assessment: AssessmentGenerator,
         usage_meter: UsageMeter | None = None,
         claim_selector: ClaimSelector | None = None,
+        submitted_pages: SubmittedPageEvidence | None = None,
     ) -> None:
         self.usage_meter = usage_meter
         self.intake = intake
@@ -87,6 +92,7 @@ class VerificationPipeline:
         self.sublinks = sublinks
         self.assessment = assessment
         self.claim_selector = claim_selector
+        self.submitted_pages = submitted_pages
 
     async def run_text(
         self, text: str, *, channel, question: bool = False, sender_hash: str | None = None
@@ -195,6 +201,9 @@ class VerificationPipeline:
                 EVIDENCE_SEARCH_FAILED_MESSAGE,
             )
 
+        if intake_result.source_url and intake_result.source_text and self.submitted_pages is not None:
+            search_result = await asyncio.to_thread(self._with_submitted_page, intake_result, claim_lookup, search_result)
+
         outcomes: dict[str, ClaimOutcome] = {
             claim.id: ClaimOutcome(
                 claim.id, by_id[claim.id].text, by_id[claim.id].kind.value, open_question_assessment(claim),
@@ -252,6 +261,12 @@ class VerificationPipeline:
         if bundles:
             try:
                 assessed = await asyncio.to_thread(self.assessment.assess, bundles)
+            except ContentBlocked:
+                log.warning("Assessment refused by the model for run %s", intake_result.run_id, exc_info=True)
+                return PipelineResult(
+                    intake_result.submission_id, intake_result.run_id, RunStatus.OUT_OF_SCOPE,
+                    CONTENT_BLOCKED_MESSAGE,
+                )
             except Exception:
                 log.warning("Assessment failed for run %s", intake_result.run_id, exc_info=True)
                 return PipelineResult(
@@ -285,6 +300,29 @@ class VerificationPipeline:
         return PipelineResult(
             intake_result.submission_id, intake_result.run_id, RunStatus.OK, claims=ordered,
             skipped_claims=skipped_texts,
+        )
+
+    def _with_submitted_page(
+        self, intake_result: IntakeResult, claims: dict[str, ClaimForVerification], search_result: EvidenceSearchResult
+    ) -> EvidenceSearchResult:
+        """Puts the submitted trusted page's relevant passages first in each claim's evidence."""
+        assert self.submitted_pages is not None and intake_result.source_url is not None
+        wanted = {
+            evidence.claim_id: claim_terms([claims[evidence.claim_id].text, *claims[evidence.claim_id].search_queries])
+            for evidence in search_result.claims
+        }
+        try:
+            extra = self.submitted_pages.items_for(intake_result.source_url, intake_result.source_text, wanted)
+        except Exception:
+            log.warning("Submitted page evidence failed for run %s", intake_result.run_id, exc_info=True)
+            return search_result
+        return search_result.model_copy(
+            update={
+                "claims": [
+                    evidence.model_copy(update={"items": [*extra.get(evidence.claim_id, []), *evidence.items]})
+                    for evidence in search_result.claims
+                ]
+            }
         )
 
     def _select_claims(self, input_text: str, claims: list[ClaimForVerification]) -> ClaimSelection:

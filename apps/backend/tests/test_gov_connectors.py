@@ -5,7 +5,8 @@ import pytest
 from prawdowid.ai.adapters.decision import BooleanAnswer, DecisionResult
 from prawdowid.ingestion.catalog import CollectSpec, SourceEntry
 from prawdowid.ingestion.domain import CorpusDocument, Skipped
-from prawdowid.services.gov_connectors import GovConnectorFetcher, GovConnectorSelector
+from prawdowid.services.gov_connectors import GovConnectorFetcher, GovConnectorSelector, _Document
+from prawdowid.services.relevance import claim_terms
 
 
 def entry(slug: str, *, listing_urls=("https://www.gov.pl/web/x/aktualnosci",)) -> SourceEntry:
@@ -100,3 +101,44 @@ def test_fetcher_records_failed_slugs_without_losing_other_sources(monkeypatch) 
 
     assert len(result.items) == 1
     assert result.failed_slugs == ["gov-bad"]
+
+
+def site_entry(slug: str, collector: str = "official_page", **params) -> SourceEntry:
+    return SourceEntry(
+        slug=slug, name=slug, publisher=f"Publisher {slug}", kind="official", domain="drogi.gddkia.gov.pl",
+        tier=1, license="test", inclusion_rule=f"Zakres {slug}", collect=CollectSpec(collector=collector, **params),
+    )
+
+
+def test_official_page_keeps_only_the_passages_about_the_claim() -> None:
+    page = _Document(
+        title="Lista utrudnień",
+        url="https://drogi.gddkia.gov.pl/lista",
+        text="\n".join(
+            [f"Utrudnienie {n} na drodze krajowej nr {n} w województwie mazowieckim." for n in range(1, 60)]
+            + ["Prace drogowe na drodze S61 między węzłem Śniadowo a węzłem Szczuczyn do 30 listopada."]
+        ),
+    )
+    reader = Mock(return_value=page)
+    fetcher = GovConnectorFetcher(page_reader=reader)
+
+    result = fetcher.fetch_many(
+        [site_entry("gddkia-drogi", urls=["https://drogi.gddkia.gov.pl/lista"])],
+        claim_terms(["Prace drogowe na S61 między Śniadowem a Szczuczynem"]),
+    )
+
+    reader.assert_called_once_with("https://drogi.gddkia.gov.pl/lista", "drogi.gddkia.gov.pl")
+    [item] = result.items
+    assert item.source == "official_site" and item.catalog_slug == "gddkia-drogi"
+    assert "Szczuczyn" in item.snippet and len(item.snippet) < 1000
+
+
+def test_measurement_api_without_matching_documents_contributes_nothing() -> None:
+    station = _Document(title="Synop: Hel", url="https://danepubliczne.imgw.pl/api/data/synop", text="Hel temperatura 3,4")
+    fetcher = GovConnectorFetcher(imgw_reader=lambda: [station])
+
+    matched = fetcher.fetch_many([site_entry("imgw", collector="imgw")], claim_terms(["Temperatura na Helu"]))
+    unrelated = fetcher.fetch_many([site_entry("imgw", collector="imgw")], claim_terms(["Strajk nauczycieli"]))
+
+    assert [item.source for item in matched.items] == ["imgw"]
+    assert unrelated.items == [] and unrelated.failed_slugs == []

@@ -11,7 +11,6 @@ technical limitation later, never silently turned into "no evidence found".
 
 import asyncio
 import logging
-import re
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, time
@@ -30,6 +29,7 @@ from prawdowid.domain.evidence import (
     EvidenceSource,
 )
 from prawdowid.domain.fact_checks import FactCheckSource, TextSearchRequest
+from prawdowid.services.relevance import STOPWORDS, WORD, claim_terms, keywords, terms
 from prawdowid.services.gov_connectors import GovConnectorFetcher, GovConnectorSelector
 
 MAX_CLAIMS_PER_SEARCH = 10
@@ -49,14 +49,8 @@ WIKIPEDIA_QUERIES = 2
 WIKIPEDIA_HITS_PER_QUERY = 2
 WIKIPEDIA_MAX_ARTICLES = 3
 
-# Question words, auxiliaries and fact-checker meta words carry no topic.
-_STOPWORDS = frozenset(
-    "czy jest był była było byli są nie się że który która które którym którzy jak dla oraz albo lub "
-    "tylko jeszcze przez przed można mają miał miała mieli ma w z na do od po za ze to ten ta tym tej "
-    "tego dlaczego czemu gdzie kiedy ile jaki jaka jakie demagog demagoga sprawdzał sprawdzali "
-    "sprawdzało analizie analiza".split()
-)
-_WORD = re.compile(r"[\wąćęłńóśźżĄĆĘŁŃÓŚŹŻ%-]+")
+_STOPWORDS = STOPWORDS
+_WORD = WORD
 
 log = logging.getLogger(__name__)
 
@@ -83,12 +77,7 @@ class _EUvsDisinfoSearchResponse(BaseModel):
     results: list[_EUvsDisinfoSearchHit]
 
 
-def _keywords(text: str) -> list[str]:
-    return [
-        word
-        for word in _WORD.findall(text)
-        if word.casefold() not in _STOPWORDS and (len(word) > 3 or any(ch.isdigit() for ch in word))
-    ]
+_keywords = keywords
 
 
 def _salience(word: str) -> float:
@@ -156,9 +145,7 @@ def search_queries(
     return queries[:max_queries]
 
 
-def _terms(text: str) -> set[str]:
-    # A 5-letter prefix is a crude stem that survives most Polish inflection.
-    return {word.casefold()[:5] for word in _keywords(text)}
+_terms = terms
 
 
 def is_relevant_hit(query: str, text: str) -> bool:
@@ -483,7 +470,7 @@ class EvidenceSearchOrchestrator:
             providers["gov_pl_search"] = asyncio.to_thread(self._gov_search_items, claim)
         if self.wikipedia is not None:
             providers["wikipedia"] = asyncio.to_thread(self._wikipedia_items, claim)
-        gov_task = asyncio.to_thread(self._gov_items, claim.text) if self.gov_selector is not None else None
+        gov_task = asyncio.to_thread(self._gov_items, claim) if self.gov_selector is not None else None
 
         results = await asyncio.gather(*providers.values(), return_exceptions=True)
         items: list[EvidenceItem] = []
@@ -501,13 +488,14 @@ class EvidenceSearchOrchestrator:
             items.extend(await gov_task)
         return ClaimEvidence(claim_id=claim.id, items=items, unavailable_sources=unavailable)
 
-    def _gov_items(self, claim_text: str) -> list[EvidenceItem]:
+    def _gov_items(self, claim: ClaimForVerification) -> list[EvidenceItem]:
         assert self.gov_selector is not None and self.gov_fetcher is not None
         try:
-            selected = self.gov_selector.select(claim_text)
+            selected = self.gov_selector.select(claim.text)
             if not selected:
                 return []
-            return self.gov_fetcher.fetch_many(selected).items
+            wanted = claim_terms([claim.text, *claim.search_queries])
+            return self.gov_fetcher.fetch_many(selected, wanted).items
         except Exception:
             log.warning("gov.pl connector step failed", exc_info=True)
             return []

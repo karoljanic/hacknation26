@@ -16,6 +16,7 @@ class FetchedArticle:
     fetched_at: datetime
     encoding: str | None = None
     status_code: int = 200
+    content_type: str = "text/html"
 
 
 @dataclass(frozen=True)
@@ -61,9 +62,11 @@ class PublicWebFetcher:
         resource = self.fetch_resource(
             url,
             allowed_hosts=allowed_hosts,
-            accepted_content_types={"text/html", "application/xhtml+xml"},
-            accept_header="text/html, application/xhtml+xml",
-            content_type_description="HTML article",
+            # Official guides and reports are often PDFs (e.g. the gov.pl
+            # safety guide); the caller extracts text by content_type.
+            accepted_content_types={"text/html", "application/xhtml+xml", "application/pdf"},
+            accept_header="text/html, application/xhtml+xml, application/pdf;q=0.9",
+            content_type_description="HTML article or PDF",
         )
         return FetchedArticle(
             url=resource.url,
@@ -71,6 +74,7 @@ class PublicWebFetcher:
             fetched_at=resource.fetched_at,
             encoding=resource.encoding,
             status_code=resource.status_code,
+            content_type=resource.content_type,
         )
 
     def fetch_resource(
@@ -135,6 +139,9 @@ class PublicWebFetcher:
                     "GET",
                     path,
                     headers={
+                        # Explicit: HTTPConnection on port 443 would send
+                        # "Host: name:443", which some servers reject.
+                        "Host": host,
                         "User-Agent": self.user_agent,
                         "Accept": (
                             "text/plain"

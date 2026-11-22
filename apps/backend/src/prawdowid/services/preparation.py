@@ -1,8 +1,10 @@
-from prawdowid.adapters.sources.gov_pl import sanitize_soup
+import re
+
+from prawdowid.adapters.sources.gov_pl import extract_pdf_text, sanitize_soup
 
 from prawdowid.ai.adapters.llm import LLMAdapter
 from prawdowid.ai.adapters.media import Media
-from prawdowid.adapters.sources.web import ArticleFetcher
+from prawdowid.adapters.sources.web import ArticleFetcher, FetchedArticle
 from prawdowid.domain.claims import InputSegment
 from prawdowid.domain.preparation import MediaReading, PreparedInput
 
@@ -34,6 +36,59 @@ class NoExtractableContentError(RuntimeError):
     pass
 
 
+_BLOCK_TAGS = ["h1", "h2", "h3", "p", "li", "blockquote", "tr"]
+VISIBLE_TEXT_RATIO = 0.5
+
+
+MAX_PDF_CHARS = 60_000
+
+
+def extract_document(article: FetchedArticle, *, visible_text_fallback: bool = False) -> tuple[str | None, list[str]]:
+    """Title and text blocks of a fetched HTML page or PDF."""
+    if article.content_type == "application/pdf":
+        text = extract_pdf_text(article.body, max_chars=MAX_PDF_CHARS)
+        blocks = [" ".join(block.split()) for block in re.split(r"\n\s*\n", text)]
+        blocks = [block for block in blocks if block]
+        if not blocks:
+            raise NoExtractableContentError("PDF has no extractable text; it may be a scan")
+        return None, blocks
+    return extract_article(article, visible_text_fallback=visible_text_fallback)
+
+
+def extract_article(article: FetchedArticle, *, visible_text_fallback: bool = False) -> tuple[str | None, list[str]]:
+    """Title and readable text blocks of a fetched HTML page.
+
+    Text a reader cannot see (CSS-hidden, aria-hidden, HTML comments) is a
+    classic prompt-injection carrier: it is removed before anything reaches a
+    model. Used for user-submitted URLs, evidence pages fetched in full and
+    official pages read by the source connectors. Table rows count as blocks
+    (road-works lists, timetables are tables).
+    """
+    soup = sanitize_soup(article.body, encoding=article.encoding)
+    title = soup.title.get_text(" ", strip=True) if soup.title else None
+    for node in soup(["nav", "header", "footer", "aside", "form"]):
+        node.decompose()
+    root = soup.find("article") or soup.find("main") or soup.body
+    if root is None:
+        raise NoExtractableContentError("HTML has no readable article body")
+    texts = [
+        block.get_text(" ", strip=True)
+        for block in root.find_all(_BLOCK_TAGS)
+        if block.find(_BLOCK_TAGS) is None
+    ]
+    texts = [text for text in texts if text]
+    if visible_text_fallback:
+        # Listing and portal pages often keep their content in plain <div>s:
+        # when paragraphs hold well under half of the visible text, take the
+        # visible lines instead (hidden text is already gone, see above).
+        lines = [line for line in root.get_text("\n", strip=True).split("\n") if line.strip()]
+        if sum(map(len, texts)) < VISIBLE_TEXT_RATIO * sum(map(len, lines)):
+            texts = lines
+    if not texts:
+        raise NoExtractableContentError("HTML has no article paragraphs; JavaScript may be required")
+    return title, texts
+
+
 class InputPreparer:
     def __init__(self, *, llm: LLMAdapter, fetcher: ArticleFetcher) -> None:
         self.llm = llm
@@ -48,26 +103,7 @@ class InputPreparer:
 
     def prepare_url(self, url: str) -> PreparedInput:
         article = self.fetcher.fetch(url)
-        # Text a reader cannot see (CSS-hidden, aria-hidden, HTML comments) is
-        # a classic prompt-injection carrier: it is removed before anything
-        # reaches a model. Used both for user-submitted URLs and for evidence
-        # pages fetched in full.
-        soup = sanitize_soup(article.body, encoding=article.encoding)
-        title = soup.title.get_text(" ", strip=True) if soup.title else None
-        for node in soup(["nav", "header", "footer", "aside", "form"]):
-            node.decompose()
-        root = soup.find("article") or soup.find("main") or soup.body
-        if root is None:
-            raise NoExtractableContentError("HTML has no readable article body")
-        blocks = root.find_all(["h1", "h2", "h3", "p", "li", "blockquote"])
-        texts = [
-            block.get_text(" ", strip=True)
-            for block in blocks
-            if block.find(["h1", "h2", "h3", "p", "li", "blockquote"]) is None
-        ]
-        texts = [text for text in texts if text]
-        if not texts:
-            raise NoExtractableContentError("HTML has no article paragraphs; JavaScript may be required")
+        title, texts = extract_document(article)
         if sum(len(text) for text in texts) > 60_000:
             raise ValueError("Article text exceeds the 60000 character preparation limit")
         return PreparedInput(

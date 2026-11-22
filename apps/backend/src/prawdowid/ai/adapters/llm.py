@@ -27,6 +27,11 @@ class StructuredResult(Generic[ResultT]):
     output_tokens: int | None
 
 
+class ContentBlocked(RuntimeError):
+    """The provider refused to process or answer this content (safety
+    filters). Not an outage: retrying the same input will not help."""
+
+
 class LLMAdapter(Protocol):
     def generate(self, prompt: str, *, search: bool = False) -> GenerationResult: ...
 

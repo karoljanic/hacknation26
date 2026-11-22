@@ -182,6 +182,199 @@ collector = "gov_pl"
 static_urls = ["https://www.gov.pl/web/gddkia/informacja-drogowa---19-111"]
 
 # --------------------------------------------------------------------------- #
+# Official services outside gov.pl, read live per claim (collector
+# official_page: params urls — pages fetched only from the entry's domain).
+# --------------------------------------------------------------------------- #
+
+[[source]]
+slug = "policja-kgp"
+name = "Policja — aktualności Komendy Głównej"
+publisher = "Komenda Główna Policji"
+kind = "official"
+domain = "policja.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Komunikaty Policji: zatrzymania, oszustwa (np. „na wnuczka”), bezpieczeństwo, działania i wydarzenia policyjne w Polsce."
+homepage_url = "https://policja.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://policja.pl/pol/aktualnosci"]
+
+[[source]]
+slug = "policja-mazowiecka"
+name = "Policja mazowiecka — aktualności"
+publisher = "Komenda Wojewódzka Policji zs. w Radomiu"
+kind = "official"
+domain = "mazowiecka.policja.gov.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Komunikaty policji w województwie mazowieckim (poza Warszawą): zdarzenia, oszustwa, wypadki, zatrzymania."
+homepage_url = "https://mazowiecka.policja.gov.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://mazowiecka.policja.gov.pl/ra/aktualnosci/aktualnosci"]
+
+[[source]]
+slug = "gddkia-drogi"
+name = "GDDKiA — informacje drogowe i lista utrudnień"
+publisher = "Generalna Dyrekcja Dróg Krajowych i Autostrad"
+kind = "official"
+domain = "drogi.gddkia.gov.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Bieżące utrudnienia, remonty, zamknięcia i objazdy na drogach krajowych, ekspresowych i autostradach."
+homepage_url = "https://drogi.gddkia.gov.pl"
+[source.collect]
+collector = "official_page"
+urls = [
+  "https://drogi.gddkia.gov.pl/informacje-drogowe/lista-utrudnien",
+  "https://drogi.gddkia.gov.pl/informacje-drogowe",
+]
+
+[[source]]
+slug = "ulc"
+name = "Urząd Lotnictwa Cywilnego"
+publisher = "Urząd Lotnictwa Cywilnego"
+kind = "official"
+domain = "ulc.gov.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Lotnictwo cywilne: prawa pasażerów lotniczych, bagaż i przedmioty zabronione, czarna lista przewoźników, komunikaty ULC."
+homepage_url = "https://ulc.gov.pl"
+[source.collect]
+collector = "official_page"
+urls = [
+  "https://ulc.gov.pl/",
+  "https://ulc.gov.pl/prawa-pasazera",
+  "https://ulc.gov.pl/prawa-pasazera/poradnik-dla-pasazerow",
+]
+
+[[source]]
+slug = "utk"
+name = "Urząd Transportu Kolejowego — dla pasażerów"
+publisher = "Urząd Transportu Kolejowego"
+kind = "official"
+domain = "utk.gov.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Prawa pasażerów kolei: opóźnienia i rekompensaty za pociągi, skargi na przewoźników kolejowych."
+homepage_url = "https://utk.gov.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://utk.gov.pl/pl/pasazerowie"]
+
+[[source]]
+slug = "portal-pasazera"
+name = "Portal Pasażera (PKP PLK)"
+publisher = "PKP Polskie Linie Kolejowe S.A."
+kind = "official"
+domain = "portalpasazera.pl"
+tier = 1
+license = "Treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Rozkłady jazdy i utrudnienia w ruchu pociągów na sieci PKP PLK, komunikaty dla pasażerów kolei."
+homepage_url = "https://portalpasazera.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://portalpasazera.pl/"]
+
+[[source]]
+slug = "sok"
+name = "Straż Ochrony Kolei"
+publisher = "Komenda Główna Straży Ochrony Kolei"
+kind = "official"
+domain = "kgsok.pl"
+tier = 1
+license = "Treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Bezpieczeństwo na kolei: interwencje i zatrzymania Straży Ochrony Kolei, kradzieże i wandalizm na terenach kolejowych."
+homepage_url = "https://kgsok.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://kgsok.pl/"]
+
+[[source]]
+slug = "sar"
+name = "Morska Służba Poszukiwania i Ratownictwa (SAR)"
+publisher = "Morska Służba Poszukiwania i Ratownictwa"
+kind = "official"
+domain = "sar.gov.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Ratownictwo na Bałtyku: akcje ratownicze, numer alarmowy, jednostki i bezpieczeństwo na morzu."
+homepage_url = "https://www.sar.gov.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://www.sar.gov.pl/"]
+
+[[source]]
+slug = "um-gdynia"
+name = "Urząd Morski w Gdyni"
+publisher = "Urząd Morski w Gdyni"
+kind = "official"
+domain = "umgdy.gov.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Administracja morska Polski środkowej i wschodniej: brzeg morski, porty, inwestycje i komunikaty Urzędu Morskiego w Gdyni."
+homepage_url = "https://www.umgdy.gov.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://www.umgdy.gov.pl/"]
+
+[[source]]
+slug = "um-szczecin"
+name = "Urząd Morski w Szczecinie — warunki żeglugi"
+publisher = "Urząd Morski w Szczecinie"
+kind = "official"
+domain = "ums.gov.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Bezpieczeństwo żeglugi na zachodnim wybrzeżu: komunikaty kapitanatów portów (Świnoujście, Szczecin), ograniczenia i warunki żeglugi."
+homepage_url = "https://www.ums.gov.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://www.ums.gov.pl/bezpieczenstwo-morskie/warunki-zeglugi"]
+
+[[source]]
+slug = "gios-powietrze"
+name = "GIOŚ — Portal Jakość Powietrza"
+publisher = "Główny Inspektorat Ochrony Środowiska"
+kind = "official"
+domain = "powietrze.gios.gov.pl"
+tier = 1
+license = "Materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Jakość powietrza i smog w Polsce: komunikaty i ostrzeżenia Państwowego Monitoringu Środowiska."
+homepage_url = "https://powietrze.gios.gov.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://powietrze.gios.gov.pl/pjp/"]
+
+[[source]]
+slug = "cert-polska"
+name = "CERT Polska — komunikaty"
+publisher = "CERT Polska (NASK)"
+kind = "official"
+domain = "moje.cert.pl"
+tier = 1
+license = "Treści wg warunków serwisu (do potwierdzenia)."
+inclusion_rule = "Cyberbezpieczeństwo: ostrzeżenia CERT Polska przed oszustwami (SMS, phishing), kampaniami wyłudzeń i krytycznymi podatnościami."
+homepage_url = "https://moje.cert.pl"
+[source.collect]
+collector = "official_page"
+urls = ["https://moje.cert.pl/komunikaty/"]
+
+[[source]]
+slug = "imgw"
+name = "IMGW-PIB — dane publiczne"
+publisher = "Instytut Meteorologii i Gospodarki Wodnej – Państwowy Instytut Badawczy"
+kind = "public_data"
+domain = "danepubliczne.imgw.pl"
+tier = 1
+license = "Dane publiczne IMGW-PIB (wymagane podanie źródła)."
+inclusion_rule = "Pogoda i woda w Polsce: ostrzeżenia meteorologiczne i hydrologiczne, bieżące pomiary temperatury, wiatru, ciśnienia (stacje synoptyczne) i stanów wody na rzekach."
+homepage_url = "https://danepubliczne.imgw.pl"
+[source.collect]
+collector = "imgw"
+
+# --------------------------------------------------------------------------- #
 # Official, queried live per claim during POST /check (collector live_only: no
 # batch sweep). Public JSON APIs, no key.
 # --------------------------------------------------------------------------- #

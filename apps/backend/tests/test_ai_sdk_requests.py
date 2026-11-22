@@ -2,6 +2,7 @@ import base64
 import json
 
 import httpx
+import pytest
 import httpx2
 from google import genai
 from google.genai import types
@@ -14,6 +15,7 @@ from prawdowid.ai.adapters.decision import (
     ScoreQuestion,
 )
 from prawdowid.ai.adapters.media import Media
+from prawdowid.ai.adapters.llm import ContentBlocked
 from prawdowid.ai.instances.gemini import GeminiAdapter
 from prawdowid.ai.instances.gemini_embeddings import GeminiEmbeddingAdapter
 from prawdowid.ai.instances.jev import JevAdapter
@@ -166,3 +168,26 @@ def test_gemini_embedding_serializes_text_and_image() -> None:
         "mime_type": "image/png",
         "data": base64.b64encode(b"image-bytes").decode(),
     }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"promptFeedback": {"blockReason": "SAFETY"}},
+        {"candidates": [{"finishReason": "PROHIBITED_CONTENT"}]},
+    ],
+)
+def test_gemini_refusal_is_reported_as_content_blocked_not_an_outage(payload: dict) -> None:
+    sent: dict = {}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.update(json.loads(request.content))
+        return httpx.Response(200, json=payload)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as http_client:
+        with genai.Client(api_key="test-key", http_options=types.HttpOptions(httpx_client=http_client)) as client:
+            with pytest.raises(ContentBlocked):
+                GeminiAdapter(client, "test-model").generate("Czy nożownik zabił trzy osoby?")
+
+    thresholds = {setting["threshold"] for setting in sent["safetySettings"]}
+    assert thresholds == {"BLOCK_ONLY_HIGH"}

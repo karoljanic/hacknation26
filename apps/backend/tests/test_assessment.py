@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pytest
 from pydantic import ValidationError
 
+from prawdowid.ai.adapters.decision import BooleanAnswer, DecisionResult
 from prawdowid.ai.adapters.llm import StructuredResult
 from prawdowid.domain.evidence import (
     ClaimEvidenceBundle,
@@ -462,3 +463,51 @@ def test_quote_differing_only_in_non_breaking_spaces_is_accepted_and_stored_verb
     assert assessment.verdict == "false"
     assert assessment.citations[0].quote == source_text
     assert llm.generate_structured.call_count == 1
+
+
+def exactness_scores(score: float, partial: float = 0.0) -> Mock:
+    """Decision fake: first call is the exactness check, the second the partial-truth check."""
+    scores = iter([score, partial])
+    decision = Mock()
+    decision.decide.side_effect = lambda state, questions: (lambda value: DecisionResult(
+        model="jev", input_tokens=1, output_tokens=1,
+        answers={key: BooleanAnswer(type="noul", noul=value) for key in questions},
+    ))(next(scores))
+    return decision
+
+
+def test_hard_verdict_whose_quote_is_not_exact_is_softened() -> None:
+    llm = Mock()
+    llm.generate_structured.return_value = output()
+
+    assessment = AssessmentGenerator(llm=llm, exactness=exactness_scores(0.2)).assess([bundle()]).data.assessments[0]
+
+    assert assessment.verdict == "insufficient_evidence"
+    assert assessment.strength == "weak"
+    assert assessment.explanation.startswith("Nie wiem na pewno.")
+    assert [c.relation for c in assessment.citations] == ["adds_context"]
+
+
+def test_exact_quote_keeps_the_hard_verdict_and_an_outage_does_not_change_it() -> None:
+    llm = Mock()
+    llm.generate_structured.return_value = output()
+    broken = Mock()
+    broken.decide.side_effect = RuntimeError("jev down")
+
+    exact = AssessmentGenerator(llm=llm, exactness=exactness_scores(0.9)).assess([bundle()]).data.assessments[0]
+    unchecked = AssessmentGenerator(llm=llm, exactness=broken).assess([bundle()]).data.assessments[0]
+
+    assert exact.verdict == "false" and unchecked.verdict == "false"
+
+
+def test_quote_confirming_the_core_but_not_a_detail_is_a_partial_truth() -> None:
+    llm = Mock()
+    llm.generate_structured.return_value = output(
+        verdict="confirmed", citations=[{"evidence_index": 0, "quote": "Demagog ocenił tezę jako fałsz.", "relation": "supports"}]
+    )
+
+    assessment = AssessmentGenerator(llm=llm, exactness=exactness_scores(0.1, partial=0.8)).assess([bundle()]).data.assessments[0]
+
+    assert assessment.verdict == "misleading"
+    assert assessment.explanation.startswith("Częściowo.")
+    assert [c.relation for c in assessment.citations] == ["refutes"]

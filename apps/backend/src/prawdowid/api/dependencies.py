@@ -35,11 +35,12 @@ from prawdowid.adapters.sources.wikipedia import WikipediaClient
 from prawdowid.services.claim_selection import ClaimSelector
 from prawdowid.services.claims import ClaimExtractor
 from prawdowid.services.evidence_search import EvidenceSearchOrchestrator
-from prawdowid.services.gov_connectors import GovConnectorSelector
+from prawdowid.services.gov_connectors import CONNECTOR_COLLECTORS, GovConnectorSelector
 from prawdowid.services.intake import ClaimIntake
 from prawdowid.services.pipeline import VerificationPipeline
 from prawdowid.services.preparation import InputPreparer
 from prawdowid.services.sublinks import SublinkSelector
+from prawdowid.services.submitted_page import SubmittedPageEvidence
 from prawdowid.services.usage import MeteredDecision, UsageMeter
 
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
@@ -124,7 +125,8 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
             embedder=GeminiEmbeddingAdapter(genai_client, dimensions=EMBEDDING_DIM),
             keep_run_open=True,  # the pipeline closes the run after the verdicts
         )
-        gov_pl_entries = [entry for entry in load_catalog().source if entry.collect.collector == "gov_pl"]
+        catalog_entries = load_catalog().source
+        gov_pl_entries = [entry for entry in catalog_entries if entry.collect.collector in CONNECTOR_COLLECTORS]
         evidence_search = EvidenceSearchOrchestrator(
             google=google,
             euvsdisinfo_connect=euvsdisinfo_connect,
@@ -137,11 +139,13 @@ async def build_pipeline() -> AsyncIterator[VerificationPipeline]:
         )
         sublinks = SublinkSelector(decision=decision, preparer=preparer)
         assessment = AssessmentGenerator(
-            llm=GeminiAdapter(genai_client, ASSESSMENT_MODEL, thinking_level=THINKING_LEVEL)
+            llm=GeminiAdapter(genai_client, ASSESSMENT_MODEL, thinking_level=THINKING_LEVEL),
+            exactness=decision,  # hard true/false only when quotes state it exactly
         )
         yield VerificationPipeline(
             intake=intake, evidence_search=evidence_search, sublinks=sublinks, assessment=assessment,
             usage_meter=meter,
             # Without a decision model every extracted claim is checked.
             claim_selector=ClaimSelector(decision=decision) if decision is not None else None,
+            submitted_pages=SubmittedPageEvidence(entries=catalog_entries),
         )

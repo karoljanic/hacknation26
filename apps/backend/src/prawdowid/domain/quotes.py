@@ -8,11 +8,14 @@ these presentation differences and then returns the *source's own* span,
 which is what gets shown and stored: the quote stays verbatim.
 """
 
+import re
 import unicodedata
 
 _QUOTES = {ord(c): '"' for c in "„”“‟«»″"} | {ord(c): "'" for c in "’‘‚‛′"}
 _DASHES = {ord(c): "-" for c in "‐‑‒–—―−"}
 _FOLD = _QUOTES | _DASHES
+_ELISION = re.compile(r"\s*(?:\[\s*(?:\.\.\.|…)\s*\]|\(\s*(?:\.\.\.|…)\s*\)|\.\.\.|…)\s*")
+MAX_ELIDED_CHARS = 300
 
 
 def _normalize_with_map(text: str) -> tuple[str, list[int]]:
@@ -40,9 +43,37 @@ def _normalize_with_map(text: str) -> tuple[str, list[int]]:
 def locate_quote(text: str, quote: str) -> tuple[int, int] | None:
     """``(start, end)`` of ``quote`` in ``text``, tolerant to whitespace and
     typographic variants only (no paraphrase, no case folding); ``None`` if
-    absent."""
+    absent.
+
+    A quote shortened with an elision ("A [...] B") matches when its parts
+    occur in order and close together; the span then covers the omitted
+    middle too, so what is stored is still the source's own contiguous text.
+    """
     if not quote.strip():
         return None
+    parts = [part for part in (p.strip() for p in _ELISION.split(quote)) if part]
+    if len(parts) > 1:
+        return _locate_elided(text, parts, len(quote))
+    return _locate_whole(text, quote)
+
+
+def _locate_elided(text: str, parts: list[str], quote_length: int) -> tuple[int, int] | None:
+    spans: list[tuple[int, int]] = []
+    offset = 0
+    for part in parts:
+        span = _locate_whole(text[offset:], part)
+        if span is None:
+            return None
+        spans.append((offset + span[0], offset + span[1]))
+        offset += span[1]
+    start, end = spans[0][0], spans[-1][1]
+    # An elision may skip a clause, not half the page.
+    if end - start > quote_length + MAX_ELIDED_CHARS:
+        return None
+    return start, end
+
+
+def _locate_whole(text: str, quote: str) -> tuple[int, int] | None:
     start = text.find(quote)
     if start >= 0:
         return start, start + len(quote)
