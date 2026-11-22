@@ -208,7 +208,7 @@ class ClaimIntake:
 
         if not extraction.data.claims:
             message = (
-                "Ta strona nie zawiera twierdzeń do sprawdzenia (np. to spis treści lub strona startowa). "
+                "Ta strona nie zawiera twierdzeń do sprawdzenia. "
                 "Wklej link ponownie i zadaj pytanie o konkretną informację z tej strony."
                 if url is not None
                 else "Nie znaleziono twierdzeń do sprawdzenia. Opisz, co dokładnie chcesz zweryfikować."

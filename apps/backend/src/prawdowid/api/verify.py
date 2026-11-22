@@ -57,7 +57,7 @@ async def build_verifier() -> AsyncIterator[AnswerVerifier]:
     signing_key = get_signing_key()
     if not signing_key:
         raise VerifierUnavailable(
-            f"Weryfikacja podpisu nie jest skonfigurowana (brak zmiennej {SIGNING_KEY_ENV})."
+            f"Weryfikacja podpisu nie jest skonfigurowana. Brakuje zmiennej {SIGNING_KEY_ENV}."
         )
 
     gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -118,7 +118,7 @@ async def verify(
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Dołącz zrzut ekranu odpowiedzi Prawdowida (pole `file`).",
+            detail="Dołącz zrzut ekranu odpowiedzi Prawdowida.",
         )
 
     media_bytes = await _read_media(file, InputType.IMAGE)

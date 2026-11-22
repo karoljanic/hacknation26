@@ -47,7 +47,7 @@ ASSESSMENT_FAILED_MESSAGE = "Błąd techniczny podczas oceny zgłoszenia. Sprób
 EVIDENCE_SEARCH_FAILED_MESSAGE = "Błąd techniczny podczas wyszukiwania dowodów. Spróbuj ponownie później."
 PERSISTENCE_FAILED_MESSAGE = "Błąd techniczny podczas zapisu wyniku. Spróbuj ponownie później."
 UNEXPECTED_FAILURE_MESSAGE = "Błąd techniczny podczas sprawdzania. Spróbuj ponownie później."
-CANCELLED_MESSAGE = "Sprawdzanie przerwane (anulowane) przed zakończeniem."
+CANCELLED_MESSAGE = "Sprawdzanie zostało anulowane przed zakończeniem."
 
 log = logging.getLogger(__name__)
 

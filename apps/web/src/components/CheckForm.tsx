@@ -155,7 +155,7 @@ export function CheckForm() {
     setDrafts((current) => ({ ...current, [type]: { ...current[type], ...change } }));
   }
 
-  // Pozwala wkleić zrzut ekranu ze schowka (Ctrl+V / Cmd+V) w dowolnym miejscu strony.
+  // Pozwala wkleić zrzut ekranu ze schowka w dowolnym miejscu strony.
   useEffect(() => {
     function handleWindowPaste(event: ClipboardEvent) {
       const items = event.clipboardData?.items;
@@ -254,8 +254,8 @@ export function CheckForm() {
       return;
     }
 
-    setDrafts(emptyDrafts());
-
+    // The submitted text, link and file stay in the form after the answer,
+    // so the user can see what was checked and adjust it.
     switch (payload.status) {
       case "ok":
         setState({
@@ -305,7 +305,6 @@ export function CheckForm() {
 
         if (verifyResponse.ok) {
           if (verifyPayload.status === "verified" || verifyPayload.status === "invalid_hash") {
-            setDrafts(emptyDrafts());
             setState({
               kind: "verified-output",
               authentic: Boolean(verifyPayload.authentic),
@@ -333,7 +332,7 @@ export function CheckForm() {
     type === "text" ? "Treść lub pytanie do sprawdzenia" : "Pytanie (opcjonalnie)";
   const textHint =
     type === "text"
-      ? "Wklej wiadomość, wpis lub cytat albo zadaj pytanie, na które da się odpowiedzieć „tak” lub „nie”, np. „Czy we Włoszech ostatnio odbywał się strajk generalny?”. Nie podawaj danych osobowych."
+      ? "Wklej wiadomość, wpis lub cytat albo zadaj pytanie, na które da się odpowiedzieć „tak” lub „nie”. Nie podawaj danych osobowych."
       : type === "image"
         ? "Co dokładnie chcesz sprawdzić? Jeśli wklejasz zrzut ekranu odpowiedzi Prawdowida z hashem, rozpoznamy go automatycznie."
         : type === "video"
@@ -390,7 +389,7 @@ export function CheckForm() {
             </label>
             <p id={`${ids}-file-hint`} className="field__hint">
               {type === "image"
-                ? "JPG, PNG lub WebP, maksymalnie 12 MB. Wybierz plik albo wklej zrzut ekranu ze schowka (Ctrl+V / Cmd+V)."
+                ? "JPG, PNG lub WebP, maksymalnie 12 MB. Wybierz plik albo wklej zrzut ekranu ze schowka."
                 : "MP4, WebM lub MOV, maksymalnie 12 MB."}
             </p>
             {fileError && (
@@ -645,7 +644,7 @@ function HashBadge({ hash }: { hash: string }) {
         </button>
         <span id={tooltipId} role="tooltip" className="answer-hash__tooltip">
           Kryptograficzny podpis odpowiedzi Prawdowida. Prześlij lub wklej zrzut ekranu tej odpowiedzi w polu
-          zdjęcia powyżej (np. Ctrl+V), aby potwierdzić, że nie została zmieniona.
+          zdjęcia powyżej, aby potwierdzić, że nie została zmieniona.
         </span>
       </span>
     </span>
@@ -662,7 +661,7 @@ function ClaimResult({ claim, answerHash }: { claim: Claim; answerHash: string |
         {answerHash && <HashBadge hash={answerHash} />}
         <span className="strength">{STRENGTH_LABEL[claim.strength]}</span>
         {claim.basis === "general_knowledge" && (
-          <span className="basis-badge">Wiedza ogólna – bez źródła</span>
+          <span className="basis-badge">Brak źródeł</span>
         )}
       </div>
       <p className="claim-result__explanation">{claim.explanation}</p>

@@ -156,7 +156,7 @@ async def _read_media(file: UploadFile, input_type: InputType) -> bytes:
     if len(data) > MAX_MEDIA_BYTES:
         raise HTTPException(
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail=f"Plik jest za duży (maksymalnie {MAX_MEDIA_BYTES // 1_000_000} MB).",
+            detail=f"Plik jest za duży. Maksymalny rozmiar to {MAX_MEDIA_BYTES // 1_000_000} MB.",
         )
     if not _matches_signature(data, mime_type):
         raise _invalid("Zawartość pliku nie odpowiada jego formatowi.")

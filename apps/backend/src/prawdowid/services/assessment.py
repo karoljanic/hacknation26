@@ -67,8 +67,9 @@ General knowledge: only for a claim whose general_knowledge_allowed is true, and
 only when no evidence item settles it, you may answer from well-established,
 uncontroversial general knowledge (e.g. the Battle of Grunwald took place on 15
 July 1410). Then set reasons.basis to "general_knowledge", strength "weak", cite
-nothing, and say plainly in the explanation that you found no source and this
-is general knowledge. Never do this when general_knowledge_allowed is false,
+nothing, and give just the answer: do not mention general knowledge, common
+knowledge or that the fact is well known (the reader is told separately that
+no sources were found). Never do this when general_knowledge_allowed is false,
 nor for anything disputed, recent or uncertain: use insufficient_evidence. When
 evidence settles the claim, base the verdict on it with basis "evidence".
 
@@ -82,7 +83,7 @@ written, which is unknown unless stated: never assume it was today. Dates,
 years and periods in the evidence must match the claim's; a fact true for one
 year or period is not proof for another. Name concrete dates in the
 explanation when they matter (e.g. "według danych z 2023 r."). Always write
-exact dates, not only relative words: "dziś (21 listopada 2026 r.)",
+exact dates, not only relative words: "dziś, 21 listopada 2026 r.",
 "wczoraj, 20 listopada 2026 r.". A report or
 list from one moment (e.g. a morning report saying there are no warnings)
 says nothing about what was issued or valid later: compare publication times
@@ -240,15 +241,15 @@ def _correct_announcement_confirmation(
                 for c in assessment.citations
             ],
             "explanation": (
-                f"Nie wiem. Zapowiadano to wydarzenie („{supporting[0].quote}”), "
-                "ale nie mam informacji, czy faktycznie się odbyło."
+                f"Nie wiem. Zapowiadano to wydarzenie: „{supporting[0].quote}”. "
+                "Nie mam informacji, czy faktycznie się odbyło."
             ),
             "limitations": "Zapowiedź nie potwierdza, że wydarzenie się odbyło.",
         }
     )
 
 
-GENERAL_KNOWLEDGE_NOTE = "Nie znalazłem źródła – to odpowiedź z wiedzy ogólnej. Warto sprawdzić ją samodzielnie."
+GENERAL_KNOWLEDGE_NOTE = "Brak źródeł potwierdzających tę odpowiedź."
 NO_INFORMATION = "Nie wiem. Nie znalazłem wiarygodnych informacji na ten temat."
 NEEDS_DETAILS = "Nie wiem – potrzebuję więcej szczegółów, żeby to sprawdzić."
 MAX_MISSING_DETAILS = 3
@@ -384,9 +385,8 @@ def _partly_true(assessment: ClaimAssessmentOutput) -> ClaimAssessmentOutput:
         update={
             "verdict": "misleading",
             "strength": "weak" if assessment.strength == "weak" else "moderate",
-            "explanation": "Częściowo. Źródło potwierdza główną część tej tezy, ale nie wszystkie szczegóły "
-            f"się zgadzają (np. liczba, data albo zakres).{said}",
-            "limitations": "Część tezy nie zgadza się ze źródłem dokładnie.",
+            "explanation": f"Częściowo. Źródło potwierdza główną część tej tezy, ale nie wszystkie szczegóły.{said}",
+            "limitations": None,
             # The quote states the differing detail, which is what refutes the claim as worded.
             "citations": [
                 c.model_copy(update={"relation": "refutes"}) if c.relation in ("supports", "refutes") else c
@@ -410,9 +410,8 @@ def _not_exact(assessment: ClaimAssessmentOutput) -> ClaimAssessmentOutput:
         update={
             "verdict": "insufficient_evidence",
             "strength": "weak",
-            "explanation": "Nie wiem na pewno. Znalezione źródło mówi o tym, ale nie potwierdza ani nie obala "
-            f"tej tezy dokładnie.{said}",
-            "limitations": "Cytat nie odpowiada tezie dokładnie (np. inna liczba, data, zakres albo tylko część tezy).",
+            "explanation": f"Nie wiem na pewno. Źródło mówi o tym, ale nie potwierdza ani nie obala tej tezy wprost.{said}",
+            "limitations": None,
             "citations": [c.model_copy(update={"relation": "adds_context"}) for c in assessment.citations],
         }
     )
