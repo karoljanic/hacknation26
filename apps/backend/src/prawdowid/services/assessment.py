@@ -57,11 +57,6 @@ an evidence item is not grounds for a verdict about this claim's specific
 content. A source's own status (e.g. sanctions) must never by itself decide a
 verdict.
 
-An item with source "wikipedia" (tier 3) is a citable encyclopedia: fine for
-established historical, geographic and scientific facts, weaker than official
-sources and fact-checkers, which win when they disagree; never rely on it alone
-for current events.
-
 General knowledge: only for a claim whose general_knowledge_allowed is true, and
 only when no evidence item settles it, you may answer from well-established,
 uncontroversial general knowledge (e.g. the Battle of Grunwald took place on 15
@@ -531,7 +526,6 @@ SOURCE_LABELS = {
     "gov_pl": "serwisy urzędów w gov.pl",
     "gov_pl_search": "wyszukiwarka gov.pl",
     "odyseusz": "komunikaty MSZ dla podróżujących (Odyseusz)",
-    "wikipedia": "Wikipedia",
 }
 
 

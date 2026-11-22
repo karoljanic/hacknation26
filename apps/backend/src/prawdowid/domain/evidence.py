@@ -13,7 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
-EvidenceSource = Literal["google_fact_check", "euvsdisinfo", "gov_pl", "gov_pl_search", "odyseusz", "wikipedia"]
+EvidenceSource = Literal["google_fact_check", "euvsdisinfo", "gov_pl", "gov_pl_search", "odyseusz"]
 EvidenceKind = Literal["claim_review", "case", "article", "official", "encyclopedia"]
 AssessmentBasis = Literal["evidence", "general_knowledge"]
 EvidenceRelation = Literal["supports", "refutes", "adds_context"]

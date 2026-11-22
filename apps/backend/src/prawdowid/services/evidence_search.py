@@ -1,7 +1,6 @@
 """Evidence search: for every non-opinion claim, query in parallel Google Fact
 Check and EUvsDisinfo (always), gov.pl site search, MSZ Odyseusz travel
-advisories for the foreign countries the claim names and Polish Wikipedia
-(when configured), plus the catalogued gov.pl sections a decision step picks.
+advisories for the foreign countries the claim names (when configured), plus the catalogued gov.pl sections a decision step picks.
 
 Each provider is called independently per claim; a provider outage for one
 claim does not block the other providers or other claims, but is recorded in
@@ -20,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError
 
 from prawdowid.adapters.sources.euvsdisinfo import EUvsDisinfoAdapter
 from prawdowid.adapters.sources.gov_api import CountryAdvisory, GovPlSearchClient, GovSearchHit, OdyseuszClient
-from prawdowid.adapters.sources.wikipedia import WikipediaClient
 from prawdowid.domain.euvsdisinfo import EUvsDisinfoSearchRequest
 from prawdowid.domain.evidence import (
     ClaimEvidence,
@@ -44,10 +42,6 @@ GOV_SEARCH_MIN_TERM_OVERLAP = 0.6
 GOV_SEARCH_SLUG = "gov-pl-search"
 ODYSEUSZ_SLUG = "msz-odyseusz"
 ODYSEUSZ_PUBLISHER = "Ministerstwo Spraw Zagranicznych (Odyseusz)"
-WIKIPEDIA_SLUG = "wikipedia-pl"
-WIKIPEDIA_QUERIES = 2
-WIKIPEDIA_HITS_PER_QUERY = 2
-WIKIPEDIA_MAX_ARTICLES = 3
 
 # Question words, auxiliaries and fact-checker meta words carry no topic.
 _STOPWORDS = frozenset(
@@ -323,7 +317,6 @@ class EvidenceSearchOrchestrator:
         gov_fetcher: GovConnectorFetcher | None = None,
         gov_search: GovPlSearchClient | None = None,
         odyseusz: OdyseuszClient | None = None,
-        wikipedia: WikipediaClient | None = None,
         language_code: str = "pl",
         page_size: int = 5,
         max_claims: int = MAX_CLAIMS_PER_SEARCH,
@@ -341,7 +334,6 @@ class EvidenceSearchOrchestrator:
         self.gov_fetcher = gov_fetcher or (GovConnectorFetcher() if gov_selector is not None else None)
         self.gov_search = gov_search
         self.odyseusz = odyseusz
-        self.wikipedia = wikipedia
         self.language_code = language_code
         self.page_size = page_size
         self.max_claims = max_claims
@@ -443,28 +435,6 @@ class EvidenceSearchOrchestrator:
             results.append(odyseusz_items(advisory) if advisory else [])
         return _merge_or_raise(results)
 
-    def _wikipedia_items(self, claim: ClaimForVerification) -> list[EvidenceItem]:
-        assert self.wikipedia is not None
-        queries = list(claim.search_queries[:WIKIPEDIA_QUERIES]) or [claim.text]
-        titles: list[str] = []
-        failures: list[Exception] = []
-        for query in queries:
-            try:
-                found = self.wikipedia.search(query, limit=WIKIPEDIA_HITS_PER_QUERY)
-            except Exception as error:
-                failures.append(error)
-                continue
-            titles.extend(title for title in found if title not in titles)
-        if failures and len(failures) == len(queries):
-            raise failures[0]
-        return [
-            EvidenceItem(
-                source="wikipedia", kind="encyclopedia", title=article.title, url=article.url,
-                publisher="Wikipedia (pl)", catalog_slug=WIKIPEDIA_SLUG, snippet=article.intro, lang="pl",
-            )
-            for article in self.wikipedia.intros(titles[:WIKIPEDIA_MAX_ARTICLES])
-        ]
-
     async def _search_claim(self, claim: ClaimForVerification) -> ClaimEvidence:
         # Each provider runs concurrently; result order fixes the evidence order.
         # A provider that is not configured (missing key) is reported exactly
@@ -481,8 +451,6 @@ class EvidenceSearchOrchestrator:
             providers["odyseusz"] = asyncio.to_thread(self._odyseusz_items, countries)
         if self.gov_search is not None:
             providers["gov_pl_search"] = asyncio.to_thread(self._gov_search_items, claim)
-        if self.wikipedia is not None:
-            providers["wikipedia"] = asyncio.to_thread(self._wikipedia_items, claim)
         gov_task = asyncio.to_thread(self._gov_items, claim.text) if self.gov_selector is not None else None
 
         results = await asyncio.gather(*providers.values(), return_exceptions=True)

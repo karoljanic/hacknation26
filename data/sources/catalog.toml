@@ -5,8 +5,7 @@
 #   * qualification: every entry states its `inclusion_rule`; only official
 #     publishers (kind=official, tier 1), public data (public_data, tier 1) and
 #     fact-checkers / verified-information databases (fact_checker, tier 2)
-#     are listed, plus the Polish Wikipedia (media, tier 3) for established
-#     general knowledge only — it loses to tier 1-2 sources when they disagree;
+#     are listed;
 #   * update: each `ingest` run re-collects the source; unchanged pages are
 #     recognised by content hash, changed pages are stored as a new version;
 #     every run is logged in `ingestion_run`;
@@ -209,19 +208,6 @@ tier = 1
 license = "Dokumenty i materiały urzędowe — art. 4 ustawy o prawie autorskim; pozostałe treści wg warunków serwisu (do potwierdzenia)."
 inclusion_rule = "Oficjalne ostrzeżenia i komunikaty MSZ dla podróżujących (strajki, protesty, zagrożenia) dla krajów wskazanych w tezie; źródło pierwotne stanowiska MSZ."
 homepage_url = "https://odyseusz.gov.pl"
-[source.collect]
-collector = "live_only"
-
-[[source]]
-slug = "wikipedia-pl"
-name = "Wikipedia (polska)"
-publisher = "Wikimedia Foundation / społeczność Wikipedii"
-kind = "media"
-domain = "pl.wikipedia.org"
-tier = 3
-license = "CC BY-SA 4.0; cytowane fragmenty z podaniem hasła i linku."
-inclusion_rule = "Encyklopedia redagowana społecznie; tylko dla ustalonych faktów historycznych, geograficznych i naukowych (np. daty bitew, wysokości szczytów). Przegrywa ze źródłami urzędowymi i fact-checkerami; nie służy do bieżących wydarzeń."
-homepage_url = "https://pl.wikipedia.org"
 [source.collect]
 collector = "live_only"
 
